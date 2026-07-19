@@ -1,0 +1,31 @@
+FAMILY LIFE OS — START HERE
+
+You do not need Terminal or coding software.
+
+1. Unzip this package.
+2. Create a new PRIVATE GitHub repository.
+3. Upload every file and folder inside this package to the repository.
+4. Create a new Firebase project and enable:
+   - Email/Password Authentication
+   - Realtime Database
+   - Cloud Storage
+5. Paste the included database.rules.json into Realtime Database > Rules.
+6. Paste the included storage.rules into Storage > Rules.
+7. Register a Firebase Web App and copy its config values.
+8. Edit firebase-config.js in GitHub and replace every PASTE_ value.
+9. Create a Gemini API key in Google AI Studio.
+10. Import the GitHub repository into Vercel.
+11. Add two Vercel environment variables:
+    GEMINI_API_KEY = your Gemini key
+    FIREBASE_WEB_API_KEY = the apiKey from firebase-config.js
+12. Deploy.
+13. Add the final Vercel domain to Firebase Authentication > Settings > Authorized domains.
+14. Open the Vercel site and create your account.
+15. Sign in with the same email/password on phone and desktop.
+
+Read README.md for exact click-by-click instructions.
+
+IMPORTANT:
+- Do not upload the ZIP file to GitHub. Unzip it first and upload its contents.
+- Do not add sw.js. This package intentionally has no service worker.
+- Cloud Storage for new Firebase projects requires the Blaze billing plan.

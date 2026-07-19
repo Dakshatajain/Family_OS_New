@@ -1,0 +1,21 @@
+{
+  "name": "Family Life OS",
+  "short_name": "FamilyOS",
+  "description": "A private family organizer for tasks, calendar, groceries, recipes, records, receipts, coupons, and more.",
+  "start_url": "/?page=dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FFFDF8",
+  "theme_color": "#5F8B6A",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml", "purpose": "any maskable" },
+    { "src": "/icon-512.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Tasks", "url": "/?page=tasks", "icons": [{ "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }] },
+    { "name": "Calendar", "url": "/?page=calendar", "icons": [{ "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }] },
+    { "name": "Receipts", "url": "/?page=receipts", "icons": [{ "src": "/icon-192.svg", "sizes": "192x192", "type": "image/svg+xml" }] }
+  ]
+}

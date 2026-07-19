@@ -1,0 +1,1818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=5"/>
+<meta name="theme-color" content="#5F8B6A"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Life OS"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="icon" href="/icon-192.svg"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<title>Family Life OS</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;font-family:'Outfit',sans-serif;background:#FFFDF8;}
+#root{height:100%;padding-top:max(8px, env(safe-area-inset-top));}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-thumb{background:#EDE8E2;border-radius:3px;}
+input,select,textarea,button{font-family:'Outfit',sans-serif;border-radius:8px;}
+input:not([type='checkbox']):not([type='radio']),select,textarea,button{-webkit-appearance:none;appearance:none;}
+input[type='checkbox'],input[type='radio']{accent-color:#5F8B6A;}
+.file-input{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden;}
+input:focus,select:focus,textarea:focus{outline:none!important;border-color:#5F8B6A!important;box-shadow:0 0 0 3px rgba(95,139,106,0.15)!important;}
+@media (max-width:768px) {
+  body{font-size:16px;}
+  input,textarea,select{font-size:16px;}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="/firebase-config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+<script>
+'use strict';
+const html = htm.bind(React.createElement);
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ── COLOURS ──────────────────────────────────────────────────────────────────
+const C = {
+  sage:'#5F8B6A',sageLt:'#EAF2EC',sageMd:'#A8C9AE',
+  coral:'#D96B50',coralLt:'#FAF0EC',
+  amber:'#E8A030',amberLt:'#FEF5E7',
+  cream:'#FFFDF8',card:'#FFFFFF',
+  text:'#2A2520',textMuted:'#7A7065',textLight:'#B0A89E',
+  border:'#EDE8E2',borderMd:'#D5CEC5',
+  purple:'#7C6DA0',purpleLt:'#F0EDF8',
+  blue:'#4A82B8',blueLt:'#EBF3FB',
+  red:'#C95050',redLt:'#FAEAEA',
+  green:'#3D8B5A',greenLt:'#E8F5EE',
+};
+
+// ── FIREBASE CONFIG ───────────────────────────────────────────────────────
+const firebaseConfig = window.FAMILY_OS_FIREBASE_CONFIG || {};
+const requiredFirebaseKeys = ['apiKey','authDomain','databaseURL','projectId','storageBucket','messagingSenderId','appId'];
+const firebaseConfigured = requiredFirebaseKeys.every(key => {
+  const value = String(firebaseConfig[key] || '');
+  return value && !value.includes('PASTE_') && !value.includes('YOUR_REAL_VALUE');
+});
+
+let auth = null;
+let database = null;
+let storage = null;
+try {
+  if (firebaseConfigured) {
+    const app = firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+    database = firebase.database();
+    storage = firebase.storage();
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+    console.log('Firebase initialized');
+  }
+} catch (e) {
+  console.warn('Firebase initialization failed:', e.message);
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const STORAGE_KEY = 'family-life-os-ui-v1';
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const localDateString = d => {
+  const x = d || new Date();
+  const y = x.getFullYear();
+  const m = String(x.getMonth()+1).padStart(2,'0');
+  const day = String(x.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+};
+const today = () => localDateString(new Date());
+const fmt = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+const daysUntil = d => {
+  if (!d) return Infinity;
+  const now = new Date(); now.setHours(0,0,0,0);
+  return Math.round((new Date(d+'T00:00:00') - now) / 86400000);
+};
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const recurringDate = (ev, yr) => {
+  if (!ev.recurring) return ev.date;
+  const o = new Date(ev.date+'T00:00:00');
+  return `${yr}-${String(o.getMonth()+1).padStart(2,'0')}-${String(o.getDate()).padStart(2,'0')}`;
+};
+const nextRecurringDate = ev => {
+  if (!ev?.date) return '';
+  if (!ev.recurring) return ev.date;
+  const now = new Date(); now.setHours(0,0,0,0);
+  let candidate = recurringDate(ev, now.getFullYear());
+  if (new Date(candidate+'T00:00:00') < now) candidate = recurringDate(ev, now.getFullYear()+1);
+  return candidate;
+};
+const escapeCsv = value => {
+  const text = String(value ?? '');
+  return /[\",\n\r]/.test(text) ? `"${text.replace(/"/g,'""')}"` : text;
+};
+const safeFileName = name => String(name||'file').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(0,100);
+const allowedFile = file => file && (file.type.startsWith('image/') || file.type === 'application/pdf');
+const maxUploadBytes = 10 * 1024 * 1024;
+const encodeBackup = value => btoa(unescape(encodeURIComponent(JSON.stringify(value))));
+const decodeBackup = value => JSON.parse(decodeURIComponent(escape(atob(value))));
+
+// ── EMPTY DATA ───────────────────────────────────────────────────────────────
+const EMPTY_DATA = {
+  tasks:[],
+  events:[],
+  maintenance:[],
+  cleaning:{daily:[],weekly:[],monthly:[],quarterly:[]},
+  groceries:{master:[],weekly:[],fridge:[]},
+  recipes:[],
+  mealPlan:{},
+  trips:[],
+  parties:[],
+  baby:{name:'',dob:'',lessonPlans:[],solids:[],inventory:[],milestones:[]},
+  records:[],
+  receiptsCoupons:[]
+};
+const normalizeData = raw => ({
+  ...EMPTY_DATA,
+  ...(raw||{}),
+  cleaning:{...EMPTY_DATA.cleaning,...(raw?.cleaning||{})},
+  groceries:{...EMPTY_DATA.groceries,...(raw?.groceries||{})},
+  baby:{...EMPTY_DATA.baby,...(raw?.baby||{})},
+  records:Array.isArray(raw?.records)?raw.records:[],
+  receiptsCoupons:Array.isArray(raw?.receiptsCoupons)?raw.receiptsCoupons:[]
+});
+
+// ── SHARED UI COMPONENTS ──────────────────────────────────────────────────────
+function Badge({children,color='sage',small}) {
+  const bg={sage:C.sageLt,coral:C.coralLt,amber:C.amberLt,purple:C.purpleLt,blue:C.blueLt,red:C.redLt,green:C.greenLt};
+  const fg={sage:C.sage,coral:C.coral,amber:C.amber,purple:C.purple,blue:C.blue,red:C.red,green:C.green};
+  return html`<span style=${{background:bg[color]||C.sageLt,color:fg[color]||C.sage,borderRadius:6,padding:small?'2px 7px':'3px 10px',fontSize:small?11:12,fontWeight:600,whiteSpace:'nowrap'}}>${children}</span>`;
+}
+
+function Btn({children,onClick,variant='primary',small,danger,style:sx,disabled}) {
+  const v = danger ? 'danger' : variant;
+  const base = {border:'none',borderRadius:8,cursor:disabled?'not-allowed':'pointer',fontFamily:'inherit',fontWeight:600,transition:'all 0.15s',display:'inline-flex',alignItems:'center',gap:6,opacity:disabled?0.5:1};
+  const vs = {
+    primary:{background:C.sage,color:'#fff',padding:small?'8px 14px':'10px 20px',fontSize:small?13:14},
+    outline:{background:'transparent',color:C.text,border:`1.5px solid ${C.borderMd}`,padding:small?'7px 13px':'9px 19px',fontSize:small?13:14},
+    ghost:{background:'transparent',color:C.textMuted,padding:small?'7px 10px':'8px 14px',fontSize:small?13:14},
+    danger:{background:C.redLt,color:C.red,padding:small?'7px 13px':'9px 19px',fontSize:small?13:14,border:`1.5px solid ${C.red}22`},
+  };
+  return html`<button onClick=${disabled?undefined:onClick} style=${{...base,...vs[v],...sx}}>${children}</button>`;
+}
+
+function Card({children,style:sx,onClick}) {
+  return html`<div onClick=${onClick} style=${{background:C.card,borderRadius:14,border:`1px solid ${C.border}`,padding:'16px 18px',boxShadow:'0 1px 4px rgba(0,0,0,0.04)',cursor:onClick?'pointer':'default',...sx}}>${children}</div>`;
+}
+
+function Inp({label,value,onChange,type='text',placeholder,required,style:sx}) {
+  return html`<div style=${{display:'flex',flexDirection:'column',gap:5,...sx}}>
+    ${label && html`<label style=${{fontSize:13,fontWeight:600,color:C.textMuted}}>${label}${required&&html`<span style=${{color:C.coral}}> *</span>`}</label>`}
+    <input type=${type} value=${value||''} onInput=${e=>onChange(e.target.value)} placeholder=${placeholder||''}
+      style=${{border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',fontSize:14,background:C.cream,color:C.text,width:'100%'}}/>
+  </div>`;
+}
+
+function Sel({label,value,onChange,options,style:sx}) {
+  return html`<div style=${{display:'flex',flexDirection:'column',gap:5,...sx}}>
+    ${label && html`<label style=${{fontSize:13,fontWeight:600,color:C.textMuted}}>${label}</label>`}
+    <select value=${value||''} onChange=${e=>onChange(e.target.value)}
+      style=${{border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',fontSize:14,background:C.cream,color:C.text}}>
+      ${options.map(o=>html`<option key=${o.value||o} value=${o.value||o}>${o.label||o}</option>`)}
+    </select>
+  </div>`;
+}
+
+function Txa({label,value,onChange,placeholder,rows=4,style:sx}) {
+  return html`<div style=${{display:'flex',flexDirection:'column',gap:5,...sx}}>
+    ${label && html`<label style=${{fontSize:13,fontWeight:600,color:C.textMuted}}>${label}</label>`}
+    <textarea value=${value||''} onInput=${e=>onChange(e.target.value)} placeholder=${placeholder||''} rows=${rows}
+      style=${{border:`1.5px solid ${C.border}`,borderRadius:8,padding:'10px 13px',fontSize:14,background:C.cream,color:C.text,resize:'vertical',width:'100%'}}></textarea>
+  </div>`;
+}
+
+function Modal({title,open,onClose,children}) {
+  useEffect(()=>{ document.body.style.overflow = open?'hidden':''; return()=>{document.body.style.overflow='';}; },[open]);
+  if (!open) return null;
+  return html`<div style=${{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:1000,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick=${onClose}>
+    <div onClick=${e=>e.stopPropagation()} style=${{background:C.card,borderRadius:'20px 20px 0 0',width:'100%',maxWidth:560,maxHeight:'92vh',overflow:'auto',boxShadow:'0 -8px 40px rgba(0,0,0,0.2)'}}>
+      <div style=${{padding:'18px 20px 14px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,background:C.card,zIndex:1}}>
+        <h3 style=${{margin:0,fontSize:17,fontWeight:700,color:C.text,fontFamily:"'DM Serif Display',serif"}}>${title}</h3>
+        <button onClick=${onClose} style=${{background:'none',border:'none',cursor:'pointer',fontSize:22,color:C.textMuted,padding:'4px 8px'}}>✕</button>
+      </div>
+      <div style=${{padding:'16px 20px 32px'}}>${children}</div>
+    </div>
+  </div>`;
+}
+
+
+function SetupRequired() {
+  return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:C.cream}}>
+    <${Card} style=${{maxWidth:560,width:'100%',padding:24}}>
+      <div style=${{fontSize:34,marginBottom:10}}>⚙️</div>
+      <h1 style=${{fontFamily:"'DM Serif Display',serif",fontSize:26,color:C.text,marginBottom:8}}>Firebase setup needed</h1>
+      <p style=${{fontSize:14,lineHeight:1.7,color:C.textMuted,marginBottom:14}}>Open <strong>firebase-config.js</strong>, replace the six PASTE_ values with the web configuration from your new Firebase project, then commit the file again.</p>
+      <div style=${{fontSize:13,color:C.textMuted,background:C.sageLt,borderRadius:10,padding:12}}>The included README has exact click-by-click instructions.</div>
+    <//>
+  </div>`;
+}
+
+function AuthScreen() {
+  const [mode,setMode] = useState('signin');
+  const [email,setEmail] = useState('');
+  const [password,setPassword] = useState('');
+  const [error,setError] = useState('');
+  const [message,setMessage] = useState('');
+  const [busy,setBusy] = useState(false);
+  const submit = async () => {
+    setError(''); setMessage(''); setBusy(true);
+    try {
+      if (mode==='register') {
+        await auth.createUserWithEmailAndPassword(email.trim(),password);
+      } else {
+        await auth.signInWithEmailAndPassword(email.trim(),password);
+      }
+    } catch(e) { setError((e.message||'Could not continue').replace('Firebase: ','')); }
+    setBusy(false);
+  };
+  const reset = async () => {
+    setError(''); setMessage('');
+    if(!email.trim()){setError('Enter your email address first.');return;}
+    try { await auth.sendPasswordResetEmail(email.trim()); setMessage('Password reset email sent.'); }
+    catch(e){setError((e.message||'Could not send reset email').replace('Firebase: ',''));}
+  };
+  return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:18,background:`linear-gradient(135deg,${C.sageLt},${C.cream},${C.amberLt})`}}>
+    <${Card} style=${{maxWidth:430,width:'100%',padding:24}}>
+      <div style=${{width:48,height:48,borderRadius:14,background:C.sage,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,marginBottom:14}}>✦</div>
+      <h1 style=${{fontFamily:"'DM Serif Display',serif",fontSize:28,color:C.text,marginBottom:4}}>Family Life OS</h1>
+      <p style=${{fontSize:14,color:C.textMuted,marginBottom:20}}>Use the same email and password on every device for automatic sync.</p>
+      <div style=${{display:'flex',gap:6,marginBottom:16}}>
+        ${[['signin','Sign in'],['register','Create account']].map(([k,l])=>html`<button key=${k} onClick=${()=>setMode(k)} style=${{flex:1,border:`1.5px solid ${mode===k?C.sage:C.border}`,background:mode===k?C.sageLt:C.card,color:mode===k?C.sage:C.textMuted,padding:'9px 10px',fontWeight:700,cursor:'pointer'}}>${l}</button>`)}
+      </div>
+      <div style=${{display:'flex',flexDirection:'column',gap:12}}>
+        <${Inp} label="Email" type="email" value=${email} onChange=${setEmail} required=${true}/>
+        <${Inp} label="Password" type="password" value=${password} onChange=${setPassword} required=${true}/>
+        ${error&&html`<div style=${{background:C.redLt,color:C.red,padding:'10px 12px',borderRadius:8,fontSize:13}}>${error}</div>`}
+        ${message&&html`<div style=${{background:C.greenLt,color:C.green,padding:'10px 12px',borderRadius:8,fontSize:13}}>${message}</div>`}
+        <${Btn} disabled=${busy||!email.trim()||password.length<6} onClick=${submit} style=${{justifyContent:'center',padding:13}}>${busy?'Please wait…':mode==='register'?'Create account':'Sign in'}<//>
+        ${mode==='signin'&&html`<button onClick=${reset} style=${{border:'none',background:'none',color:C.sage,cursor:'pointer',fontWeight:600,fontSize:13}}>Forgot password?</button>`}
+      </div>
+    <//>
+  </div>`;
+}
+
+function useMediaQuery(query) {
+  const [matches,setMatches] = useState(()=>window.matchMedia(query).matches);
+  useEffect(()=>{
+    const media=window.matchMedia(query); const change=()=>setMatches(media.matches);
+    change(); media.addEventListener?.('change',change);
+    return()=>media.removeEventListener?.('change',change);
+  },[query]);
+  return matches;
+}
+
+function AttachmentItem({attachment,onDelete}) {
+  const [url,setUrl] = useState('');
+  const [error,setError] = useState('');
+  useEffect(()=>{
+    let active=true;
+    if(!storage||!attachment?.path)return;
+    storage.ref(attachment.path).getDownloadURL().then(u=>active&&setUrl(u)).catch(()=>active&&setError('Unavailable'));
+    return()=>{active=false;};
+  },[attachment?.path]);
+  const isImage = String(attachment?.type||'').startsWith('image/');
+  return html`<div style=${{display:'flex',alignItems:'center',gap:8,border:`1px solid ${C.border}`,borderRadius:9,padding:8,background:C.cream}}>
+    ${isImage&&url?html`<img src=${url} alt="" style=${{width:46,height:46,objectFit:'cover',borderRadius:7,border:`1px solid ${C.border}`}}/>`:html`<div style=${{width:46,height:46,borderRadius:7,background:C.redLt,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>📄</div>`}
+    <div style=${{flex:1,minWidth:0}}><div style=${{fontSize:12,fontWeight:600,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${attachment.name}</div><div style=${{fontSize:11,color:C.textMuted}}>${Math.ceil((attachment.size||0)/1024)} KB${error?' · '+error:''}</div></div>
+    ${url&&html`<a href=${url} target="_blank" rel="noopener" style=${{fontSize:12,fontWeight:700,color:C.blue,textDecoration:'none'}}>Preview</a>`}
+    ${onDelete&&html`<${Btn} variant="ghost" small onClick=${()=>onDelete(attachment)}>✕<//>`}
+  </div>`;
+}
+
+function AttachmentManager({user,area,parentId,attachments,onChange}) {
+  const [progress,setProgress] = useState('');
+  const [error,setError] = useState('');
+  const uploadOne = file => new Promise((resolve,reject)=>{
+    if(!allowedFile(file)) return reject(new Error('Only images and PDFs are allowed.'));
+    if(file.size>maxUploadBytes) return reject(new Error('Each file must be 10 MB or smaller.'));
+    const attachmentId=uid();
+    const path=`users/${user.uid}/${area}/${parentId}/${attachmentId}/${safeFileName(file.name)}`;
+    const task=storage.ref(path).put(file,{contentType:file.type});
+    task.on('state_changed',snap=>setProgress(`${Math.round(snap.bytesTransferred/snap.totalBytes*100)}%`),reject,()=>resolve({id:attachmentId,path,name:file.name,type:file.type,size:file.size,createdAt:new Date().toISOString()}));
+  });
+  const pick = async event => {
+    const files=[...(event.target.files||[])]; event.target.value='';
+    if(!files.length)return; setError('');
+    try {
+      let next=[...(attachments||[])];
+      for(const file of files){ const a=await uploadOne(file); next=[...next,a]; onChange(next); }
+    } catch(e){setError(e.message||'Upload failed.');}
+    setProgress('');
+  };
+  const remove = async attachment => {
+    setError('');
+    try { await storage.ref(attachment.path).delete(); } catch(e) { if(e.code!=='storage/object-not-found')setError('File could not be deleted from Storage.'); }
+    onChange((attachments||[]).filter(a=>a.id!==attachment.id));
+  };
+  return html`<div style=${{marginTop:10}}>
+    ${(attachments||[]).length>0&&html`<div style=${{display:'flex',flexDirection:'column',gap:7,marginBottom:8}}>${attachments.map(a=>html`<${AttachmentItem} key=${a.id} attachment=${a} onDelete=${remove}/>`)} </div>`}
+    <div style=${{display:'flex',gap:7,flexWrap:'wrap'}}>
+      <label style=${{display:'inline-flex',alignItems:'center',gap:5,border:`1.5px solid ${C.borderMd}`,borderRadius:8,padding:'7px 11px',fontSize:12,fontWeight:700,color:C.text,cursor:'pointer',background:C.card}}>📷 Camera<input className="file-input" type="file" accept="image/*" capture="environment" onChange=${pick}/></label>
+      <label style=${{display:'inline-flex',alignItems:'center',gap:5,border:`1.5px solid ${C.borderMd}`,borderRadius:8,padding:'7px 11px',fontSize:12,fontWeight:700,color:C.text,cursor:'pointer',background:C.card}}>📎 Image/PDF<input className="file-input" type="file" multiple accept="image/*,application/pdf" onChange=${pick}/></label>
+      ${progress&&html`<span style=${{fontSize:12,color:C.sage,fontWeight:700,alignSelf:'center'}}>Uploading ${progress}</span>`}
+    </div>
+    ${error&&html`<div style=${{fontSize:12,color:C.red,marginTop:6}}>${error}</div>`}
+  </div>`;
+}
+
+// ── SYNC ──────────────────────────────────────────────────────────────────────
+function SyncPanel({data,onImport,onClose}) {
+  const [mode,setMode] = useState('choose');
+  const [code,setCode] = useState('');
+  const [status,setStatus] = useState('');
+
+  const exportFile = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));
+    a.download = `family-life-os-${today()}.json`; a.click();
+    setStatus('✓ Downloaded! Send via WhatsApp or iMessage.');
+  };
+  const copyCode = async () => {
+    try { await navigator.clipboard.writeText(encodeBackup(data)); setStatus('✓ Copied! Paste in a message.'); }
+    catch { setStatus('Use Download option instead.'); }
+  };
+  const importFile = e => {
+    const file = e.target.files[0]; if(!file) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      try { const d=JSON.parse(ev.target.result); if(d.tasks&&d.events){onImport(d);setTimeout(onClose,800);} else setStatus('Invalid file.'); }
+      catch { setStatus('Could not read file.'); }
+    };
+    r.readAsText(file);
+  };
+  const importCode = () => {
+    try { const d=decodeBackup(code.trim()); if(d.tasks&&d.events){onImport(d);setTimeout(onClose,800);} else setStatus('Invalid data.'); }
+    catch { setStatus('Could not read — paste the full code.'); }
+  };
+
+  return html`<div style=${{display:'flex',flexDirection:'column',gap:12}}>
+    ${mode==='choose' && html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      <div style=${{background:C.blueLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.blue,lineHeight:1.6}}>
+        <strong>Backup & migration:</strong> Automatic sync is already active. Use this only for backups or moving old data into the new app.
+      </div>
+      <${Btn} onClick=${()=>setMode('export')} style=${{justifyContent:'center',padding:'14px'}}>📤 Export backup<//>
+      <${Btn} variant="outline" onClick=${()=>setMode('import')} style=${{justifyContent:'center',padding:'14px'}}>📥 Import backup<//>
+    </div>`}
+    ${mode==='export' && html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      <${Btn} variant="ghost" small onClick=${()=>setMode('choose')}>← Back<//>
+      <${Card} onClick=${exportFile} style=${{cursor:'pointer'}}>
+        <div style=${{fontWeight:600,color:C.text}}>📥 Download as file</div>
+        <div style=${{fontSize:13,color:C.textMuted,marginTop:3}}>Send .json file via WhatsApp, iMessage, email</div>
+      <//>
+      <${Card} onClick=${copyCode} style=${{cursor:'pointer'}}>
+        <div style=${{fontWeight:600,color:C.text}}>📋 Copy as text code</div>
+        <div style=${{fontSize:13,color:C.textMuted,marginTop:3}}>Copy a code, paste in a message</div>
+      <//>
+      ${status && html`<div style=${{background:C.greenLt,color:C.green,borderRadius:8,padding:'10px 14px',fontSize:13,fontWeight:600}}>${status}</div>`}
+    </div>`}
+    ${mode==='import' && html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      <${Btn} variant="ghost" small onClick=${()=>setMode('choose')}>← Back<//>
+      <label style=${{display:'block',background:C.sageLt,border:`2px dashed ${C.sageMd}`,borderRadius:10,padding:'20px',textAlign:'center',cursor:'pointer',fontSize:14,color:C.sage,fontWeight:600}}>
+        📁 Tap to choose backup file
+        <input type="file" accept=".json" onChange=${importFile} style=${{display:'none'}}/>
+      </label>
+      <div style=${{textAlign:'center',color:C.textMuted,fontSize:13}}>— or paste text code —</div>
+      <${Txa} label="Paste code" value=${code} onChange=${setCode} placeholder="Paste the code here..." rows=${3}/>
+      <${Btn} onClick=${importCode} disabled=${!code.trim()}>Import<//>
+      ${status && html`<div style=${{background:status.startsWith('✓')?C.greenLt:C.redLt,color:status.startsWith('✓')?C.green:C.red,borderRadius:8,padding:'10px 14px',fontSize:13,fontWeight:600}}>${status}</div>`}
+    </div>`}
+  </div>`;
+}
+
+// ── DASHBOARD ─────────────────────────────────────────────────────────────────
+function Dashboard({data,navigate}) {
+  const hr = new Date().getHours();
+  const greeting = hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
+  const yr = new Date().getFullYear();
+  const activeTasks = data.tasks.filter(t=>t.status!=='done');
+  const upcoming = [...data.events]
+    .map(e=>({...e,_next:nextRecurringDate(e)})).filter(e=>{ const du=daysUntil(e._next); return du>=0&&du<=30; })
+    .sort((a,b)=>daysUntil(a._next)-daysUntil(b._next)).slice(0,4);
+  const overdue = data.maintenance.filter(m=>daysUntil(m.nextDue)<=0);
+  const babyAge = data.baby.dob ? Math.max(0,Math.floor((new Date()-new Date(data.baby.dob+'T00:00:00'))/(1000*60*60*24*30.44))) : null;
+  const eCol = {birthday:'coral',anniversary:'purple',appointment:'blue',event:'sage'};
+
+  return html`<div>
+    <div style=${{marginBottom:22}}>
+      <h1 style=${{margin:'0 0 3px',fontSize:26,fontWeight:700,color:C.text,fontFamily:"'DM Serif Display',serif"}}>${greeting} ✦</h1>
+      <p style=${{margin:0,color:C.textMuted,fontSize:14}}>${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
+    </div>
+    <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
+      ${[
+        {label:'Open Tasks',val:activeTasks.length,c:C.coral,bg:C.coralLt,icon:'✅',nav:'tasks'},
+        {label:'Events (30d)',val:upcoming.length,c:C.purple,bg:C.purpleLt,icon:'📅',nav:'calendar'},
+        {label:'Overdue Maint.',val:overdue.length,c:C.amber,bg:C.amberLt,icon:'🏡',nav:'homecare'},
+        {label:data.baby.name&&babyAge!==null?`${data.baby.name} ${babyAge}mo`:'Child profile',val:data.baby.lessonPlans.length+' plans',c:C.sage,bg:C.sageLt,icon:'👶',nav:'baby'},
+      ].map(s=>html`<div key=${s.nav} onClick=${()=>navigate(s.nav)} style=${{background:s.bg,borderRadius:12,padding:'14px 16px',cursor:'pointer',border:`1px solid ${s.c}22`}}>
+        <div style=${{fontSize:20,marginBottom:6}}>${s.icon}</div>
+        <div style=${{fontSize:22,fontWeight:700,color:s.c}}>${s.val}</div>
+        <div style=${{fontSize:11,color:C.textMuted,marginTop:2}}>${s.label}</div>
+      </div>`)}
+    </div>
+    <div style=${{display:'flex',flexDirection:'column',gap:14}}>
+      <${Card}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>Open Tasks</span>
+          <${Btn} variant="ghost" small onClick=${()=>navigate('tasks')}>See all →<//>
+        </div>
+        ${activeTasks.slice(0,4).map(t=>html`<div key=${t.id} style=${{display:'flex',gap:10,alignItems:'center',paddingBottom:9,marginBottom:9,borderBottom:`1px solid ${C.border}`}}>
+          <div style=${{width:7,height:7,borderRadius:'50%',background:t.priority==='high'?C.coral:t.priority==='medium'?C.amber:C.sage,flexShrink:0}}></div>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:14,color:C.text}}>${t.title}</div>
+            ${t.dueDate&&html`<div style=${{fontSize:12,color:C.textMuted}}>${fmt(t.dueDate)} · ${t.owner}</div>`}
+          </div>
+        </div>`)}
+        ${activeTasks.length===0&&html`<p style=${{color:C.textMuted,textAlign:'center'}}>All clear! 🎉</p>`}
+      <//>
+      <${Card}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>Upcoming Events</span>
+          <${Btn} variant="ghost" small onClick=${()=>navigate('calendar')}>Calendar →<//>
+        </div>
+        ${upcoming.map(e=>{
+          const d=e._next||nextRecurringDate(e), du=daysUntil(d);
+          const dt=new Date(d+'T00:00:00');
+          return html`<div key=${e.id} style=${{display:'flex',gap:12,alignItems:'center',paddingBottom:9,marginBottom:9,borderBottom:`1px solid ${C.border}`}}>
+            <div style=${{background:C.sageLt,borderRadius:8,padding:'4px 8px',textAlign:'center',minWidth:44,flexShrink:0}}>
+              <div style=${{fontSize:10,color:C.sage,fontWeight:700}}>${dt.toLocaleDateString('en-US',{month:'short'})}</div>
+              <div style=${{fontSize:17,fontWeight:700,color:C.text,lineHeight:1.1}}>${dt.getDate()}</div>
+            </div>
+            <div style=${{flex:1}}>
+              <div style=${{fontSize:14,color:C.text}}>${e.title}</div>
+              <div style=${{fontSize:12,color:C.textMuted}}>${du===0?'Today!':du===1?'Tomorrow':`In ${du} days`}</div>
+            </div>
+            <${Badge} color=${eCol[e.type]||'sage'} small>${e.type}<//>
+          </div>`;
+        })}
+        ${upcoming.length===0&&html`<p style=${{color:C.textMuted,fontSize:14}}>No events in next 30 days</p>`}
+      <//>
+      <${Card} style=${{background:`linear-gradient(135deg,${C.sageLt},${C.amberLt})`}}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>👶 ${data.baby.name?data.baby.name+"'s":'Child'} Corner</span>
+          <${Btn} variant="ghost" small onClick=${()=>navigate('baby')}>View →<//>
+        </div>
+        <div style=${{fontSize:13,color:C.textMuted,marginBottom:10}}>${babyAge===null?'Add a birth date':babyAge+' months old'} · ${data.baby.milestones.length} milestones</div>
+        ${data.baby.lessonPlans[0]&&html`<div style=${{background:C.card,borderRadius:10,padding:'10px 12px'}}>
+          <div style=${{fontSize:11,fontWeight:700,color:C.sage,marginBottom:4}}>WEEK ${data.baby.lessonPlans[0].weekNum} · ${data.baby.lessonPlans[0].theme}</div>
+          <div style=${{display:'flex',gap:6,flexWrap:'wrap'}}>
+            ${[data.baby.lessonPlans[0].color,data.baby.lessonPlans[0].animal,data.baby.lessonPlans[0].letter].map((x,i)=>html`<${Badge} key=${i} color=${['coral','sage','amber'][i]} small>${x}<//>` )}
+          </div>
+        </div>`}
+      <//>
+      <${Card}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>🛒 This Week's Groceries</span>
+          <${Btn} variant="ghost" small onClick=${()=>navigate('groceries')}>View →<//>
+        </div>
+        ${data.groceries.weekly.slice(0,5).map(g=>html`<div key=${g.id} style=${{display:'flex',alignItems:'center',gap:10,marginBottom:7}}>
+          <div style=${{width:14,height:14,borderRadius:4,border:`2px solid ${g.checked?C.sage:C.borderMd}`,background:g.checked?C.sage:'transparent',flexShrink:0}}></div>
+          <span style=${{fontSize:14,color:g.checked?C.textMuted:C.text,textDecoration:g.checked?'line-through':'none',flex:1}}>${g.name}</span>
+          <span style=${{fontSize:12,color:C.textLight}}>${g.qty}</span>
+        </div>`)}
+      <//>
+    </div>
+  </div>`;
+}
+
+// ── TASKS ─────────────────────────────────────────────────────────────────────
+function Tasks({data,updateData}) {
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [filter,setFilter] = useState('active');
+  const [f,setF] = useState({title:'',priority:'medium',owner:'Me',status:'pending',dueDate:'',tags:'',note:''});
+  const open = item => { setEdit(item); setF(item?{...item}:{title:'',priority:'medium',owner:'Me',status:'pending',dueDate:'',tags:'',note:''}); setModal(true); };
+  const save = () => {
+    if (!f.title.trim()) return;
+    updateData({tasks: edit ? data.tasks.map(t=>t.id===edit.id?{...f,id:edit.id}:t) : [...data.tasks,{...f,id:uid()}]});
+    setModal(false);
+  };
+  const del = id => { updateData({tasks:data.tasks.filter(t=>t.id!==id)}); setModal(false); };
+  const toggle = id => updateData({tasks:data.tasks.map(t=>t.id===id?{...t,status:t.status==='done'?'pending':'done'}:t)});
+  const filtered = data.tasks.filter(t=>filter==='all'?true:filter==='done'?t.status==='done':t.status!=='done');
+  const pc={high:'coral',medium:'amber',low:'sage'};
+  const sc={pending:'amber','in-progress':'blue',done:'sage',blocked:'red'};
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Tasks</h2>
+      <${Btn} onClick=${()=>open(null)} small>+ Add<//>
+    </div>
+    <div style=${{display:'flex',gap:6,marginBottom:16}}>
+      ${['active','all','done'].map(s=>html`<button key=${s} onClick=${()=>setFilter(s)} style=${{border:`1.5px solid ${filter===s?C.sage:C.border}`,background:filter===s?C.sageLt:'transparent',color:filter===s?C.sage:C.textMuted,borderRadius:8,padding:'7px 14px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit',textTransform:'capitalize'}}>${s}</button>`)}
+    </div>
+    <div style=${{display:'flex',flexDirection:'column',gap:8}}>
+      ${filtered.map(t=>html`<${Card} key=${t.id} style=${{padding:'13px 15px'}}>
+        <div style=${{display:'flex',alignItems:'flex-start',gap:11}}>
+          <div onClick=${()=>toggle(t.id)} style=${{width:20,height:20,borderRadius:6,border:`2px solid ${t.status==='done'?C.sage:C.borderMd}`,background:t.status==='done'?C.sage:'transparent',cursor:'pointer',flexShrink:0,marginTop:2,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            ${t.status==='done'&&html`<span style=${{color:'#fff',fontSize:11}}>✓</span>`}
+          </div>
+          <div style=${{flex:1,minWidth:0}}>
+            <div style=${{fontSize:14,fontWeight:600,color:t.status==='done'?C.textMuted:C.text,textDecoration:t.status==='done'?'line-through':'none',marginBottom:4}}>${t.title}</div>
+            <div style=${{display:'flex',gap:6,flexWrap:'wrap',marginBottom:3}}>
+              <${Badge} color=${pc[t.priority]} small>${t.priority}<//>
+              <${Badge} color=${sc[t.status]||'sage'} small>${t.status}<//>
+            </div>
+            <div style=${{fontSize:12,color:C.textMuted,display:'flex',gap:10,flexWrap:'wrap'}}>
+              ${t.dueDate&&html`<span>📅 ${fmt(t.dueDate)}</span>`}
+              ${t.owner&&html`<span>👤 ${t.owner}</span>`}
+              ${t.tags&&html`<span>🏷 ${t.tags}</span>`}
+            </div>
+            ${t.note&&html`<div style=${{fontSize:12,color:C.textMuted,marginTop:3}}>${t.note}</div>`}
+          </div>
+          <div style=${{display:'flex',gap:4}}>
+            <${Btn} variant="ghost" small onClick=${()=>open(t)}>✎<//>
+            <${Btn} variant="ghost" small onClick=${()=>del(t.id)}>✕<//>
+          </div>
+        </div>
+      <//>` )}
+      ${filtered.length===0&&html`<${Card}><p style=${{color:C.textMuted,textAlign:'center',padding:'10px 0'}}>No tasks here!</p><//>` }
+    </div>
+    <${Modal} title=${edit?'Edit Task':'New Task'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Title" value=${f.title} onChange=${v=>setF({...f,title:v})} required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Sel} label="Priority" value=${f.priority} onChange=${v=>setF({...f,priority:v})} options=${['high','medium','low']}/>
+          <${Sel} label="Owner" value=${f.owner} onChange=${v=>setF({...f,owner:v})} options=${['Me','Partner','Family']}/>
+        </div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Sel} label="Status" value=${f.status} onChange=${v=>setF({...f,status:v})} options=${['pending','in-progress','done','blocked']}/>
+          <${Inp} label="Due Date" type="date" value=${f.dueDate} onChange=${v=>setF({...f,dueDate:v})}/>
+        </div>
+        <${Inp} label="Tags" value=${f.tags} onChange=${v=>setF({...f,tags:v})} placeholder="health, shopping..."/>
+        <${Inp} label="Note" value=${f.note} onChange=${v=>setF({...f,note:v})} placeholder="Any notes..."/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>
+          ${edit&&html`<${Btn} danger onClick=${()=>del(edit.id)}>Delete<//>`}
+          <${Btn} onClick=${save}>Save<//>
+        </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── CALENDAR ──────────────────────────────────────────────────────────────────
+function CalendarSection({data,updateData}) {
+  const [view,setView] = useState({month:new Date().getMonth(),year:new Date().getFullYear()});
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [f,setF] = useState({title:'',date:'',type:'event',recurring:false,notes:''});
+  const open = item => { setEdit(item); setF(item?{...item}:{title:'',date:'',type:'event',recurring:false,notes:''}); setModal(true); };
+  const save = () => {
+    if (!f.title||!f.date) return;
+    updateData({events: edit ? data.events.map(e=>e.id===edit.id?{...f,id:edit.id,recurring:!!f.recurring}:e) : [...data.events,{...f,id:uid(),recurring:!!f.recurring}]});
+    setModal(false);
+  };
+  const del = id => { updateData({events:data.events.filter(e=>e.id!==id)}); setModal(false); };
+  const dim = new Date(view.year,view.month+1,0).getDate();
+  const fd = new Date(view.year,view.month,1).getDay();
+  const tc = {birthday:C.coral,anniversary:C.purple,appointment:C.blue,event:C.sage};
+  const eventsForDay = d => {
+    const ds = `${view.year}-${String(view.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    return data.events.filter(e=>recurringDate(e,view.year)===ds);
+  };
+  const upcoming = [...data.events].map(e=>({...e,rd:nextRecurringDate(e)}))
+    .filter(e=>daysUntil(e.rd)>=0).sort((a,b)=>daysUntil(a.rd)-daysUntil(b.rd)).slice(0,6);
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Calendar</h2>
+      <${Btn} onClick=${()=>open(null)} small>+ Event<//>
+    </div>
+    <${Card} style=${{padding:0,marginBottom:14}}>
+      <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'13px 16px',borderBottom:`1px solid ${C.border}`}}>
+        <${Btn} variant="ghost" small onClick=${()=>setView(v=>({month:v.month===0?11:v.month-1,year:v.month===0?v.year-1:v.year}))}>‹<//>
+        <span style=${{fontWeight:700,fontSize:16,color:C.text}}>${MONTHS[view.month]} ${view.year}</span>
+        <${Btn} variant="ghost" small onClick=${()=>setView(v=>({month:v.month===11?0:v.month+1,year:v.month===11?v.year+1:v.year}))}>›<//>
+      </div>
+      <div style=${{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
+        ${['S','M','T','W','T','F','S'].map((d,i)=>html`<div key=${i} style=${{textAlign:'center',padding:'8px 2px',fontSize:11,fontWeight:700,color:C.textMuted}}>${d}</div>`)}
+      </div>
+      <div style=${{display:'grid',gridTemplateColumns:'repeat(7,1fr)'}}>
+        ${Array.from({length:fd},(_,i)=>html`<div key=${'e'+i}></div>`)}
+        ${Array.from({length:dim},(_,i)=>i+1).map(d=>{
+          const evs=eventsForDay(d);
+          const isT=today()===`${view.year}-${String(view.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          return html`<div key=${d} onClick=${()=>evs.length&&open(evs[0])} style=${{minHeight:52,padding:'5px 3px',borderTop:`1px solid ${C.border}`,background:isT?C.sageLt:'transparent',cursor:evs.length?'pointer':'default'}}>
+            <div style=${{fontSize:12,fontWeight:isT?700:400,color:isT?C.sage:C.text,textAlign:'center',marginBottom:2}}>${d}</div>
+            ${evs.slice(0,2).map(e=>html`<div key=${e.id} style=${{fontSize:10,background:tc[e.type]||C.sage,color:'#fff',borderRadius:3,padding:'1px 3px',marginBottom:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${e.recurring?'↻ ':''}${e.title.split(' ').slice(0,2).join(' ')}</div>`)}
+          </div>`;
+        })}
+      </div>
+    <//>
+    <div style=${{fontWeight:700,fontSize:12,color:C.textMuted,marginBottom:10,textTransform:'uppercase',letterSpacing:0.5}}>Coming Up</div>
+    <div style=${{display:'flex',flexDirection:'column',gap:8}}>
+      ${upcoming.map(e=>{ const du=daysUntil(e.rd); return html`<${Card} key=${e.id} style=${{padding:'12px 15px'}}>
+        <div style=${{display:'flex',alignItems:'center',gap:12}}>
+          <div style=${{width:6,height:6,borderRadius:'50%',background:tc[e.type]||C.sage,flexShrink:0}}></div>
+          <div style=${{flex:1}}>
+            <div style=${{fontSize:14,fontWeight:600,color:C.text}}>${e.title}${e.recurring&&html`<span style=${{fontSize:11,color:C.purple,marginLeft:6}}>↻</span>`}</div>
+            <div style=${{fontSize:12,color:C.textMuted}}>${fmt(e.rd)} · ${du===0?'Today!':du===1?'Tomorrow':`${du} days`}</div>
+          </div>
+          <${Btn} variant="ghost" small onClick=${()=>open(e)}>✎<//>
+          <${Btn} variant="ghost" small onClick=${()=>del(e.id)}>✕<//>
+        </div>
+      <//>`;} )}
+    </div>
+    <${Modal} title=${edit?'Edit Event':'New Event'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Title" value=${f.title} onChange=${v=>setF({...f,title:v})} required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Date" type="date" value=${f.date} onChange=${v=>setF({...f,date:v})} required=${true}/>
+          <${Sel} label="Type" value=${f.type} onChange=${v=>setF({...f,type:v})} options=${['event','birthday','anniversary','appointment']}/>
+        </div>
+        <div style=${{display:'flex',alignItems:'center',gap:10,background:C.purpleLt,borderRadius:8,padding:'10px 12px'}}>
+          <input type="checkbox" id="rc" checked=${!!f.recurring} onChange=${e=>setF({...f,recurring:e.target.checked})} style=${{width:16,height:16}}/>
+          <label for="rc" style=${{fontSize:14,color:C.text,cursor:'pointer'}}>Repeat every year (birthdays & anniversaries)</label>
+        </div>
+        <${Inp} label="Notes" value=${f.notes} onChange=${v=>setF({...f,notes:v})}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>
+          ${edit&&html`<${Btn} danger onClick=${()=>del(edit.id)}>Delete<//>`}
+          <${Btn} onClick=${save}>Save<//>
+        </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── GROCERIES ─────────────────────────────────────────────────────────────────
+function Groceries({data,updateData}) {
+  const [tab,setTab] = useState('weekly');
+  const [modal,setModal] = useState(null);
+  const [edit,setEdit] = useState(null);
+  const [f,setF] = useState({});
+  const openModal = (which,item) => { setModal(which); setEdit(item||null); setF(which==='master'?(item||{name:'',category:'Produce',tags:'',note:''}):which==='weekly'?(item||{name:'',qty:'',checked:false}):(item||{name:'',added:today(),expires:'',note:''})); };
+  const save = () => {
+    if (!f.name?.trim()) return;
+    const list = data.groceries[modal];
+    updateData({groceries:{...data.groceries,[modal]:edit?list.map(i=>i.id===edit.id?{...f,id:edit.id}:i):[...list,{...f,id:uid()}]}});
+    setModal(null);
+  };
+  const del = (key,id) => updateData({groceries:{...data.groceries,[key]:data.groceries[key].filter(i=>i.id!==id)}});
+  const toggleW = id => updateData({groceries:{...data.groceries,weekly:data.groceries.weekly.map(i=>i.id===id?{...i,checked:!i.checked}:i)}});
+  const cats = [...new Set(data.groceries.master.map(i=>i.category))].sort();
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Groceries</h2>
+      <${Btn} onClick=${()=>openModal(tab,null)} small>+ Add<//>
+    </div>
+    <div style=${{display:'flex',gap:6,marginBottom:16,overflowX:'auto'}}>
+      ${[['weekly','🛒 Weekly'],['master','📋 Master'],['fridge','❄️ Fridge']].map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} style=${{border:`1.5px solid ${tab===k?C.sage:C.border}`,background:tab===k?C.sage:'transparent',color:tab===k?'#fff':C.textMuted,borderRadius:8,padding:'8px 16px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit',flexShrink:0}}>${l}</button>`)}
+    </div>
+    ${tab==='weekly'&&html`<${Card}>
+      <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <span style=${{fontSize:13,color:C.textMuted,fontWeight:600}}>${data.groceries.weekly.filter(i=>i.checked).length}/${data.groceries.weekly.length} checked off</span>
+        <${Btn} variant="ghost" small onClick=${()=>updateData({groceries:{...data.groceries,weekly:data.groceries.weekly.map(i=>({...i,checked:false}))}})}>Reset<//>
+      </div>
+      ${data.groceries.weekly.map(i=>html`<div key=${i.id} style=${{display:'flex',alignItems:'center',gap:11,padding:'11px 0',borderBottom:`1px solid ${C.border}`}}>
+        <div onClick=${()=>toggleW(i.id)} style=${{width:22,height:22,borderRadius:6,border:`2px solid ${i.checked?C.sage:C.borderMd}`,background:i.checked?C.sage:'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          ${i.checked&&html`<span style=${{color:'#fff',fontSize:12}}>✓</span>`}
+        </div>
+        <span style=${{flex:1,fontSize:15,color:i.checked?C.textMuted:C.text,textDecoration:i.checked?'line-through':'none'}}>${i.name}</span>
+        <span style=${{fontSize:13,color:C.textLight}}>${i.qty}</span>
+        <${Btn} variant="ghost" small onClick=${()=>openModal('weekly',i)}>✎<//>
+        <${Btn} variant="ghost" small onClick=${()=>del('weekly',i.id)}>✕<//>
+      </div>`)}
+    <//>` }
+    ${tab==='master'&&html`<div>
+      ${cats.map(cat=>{ const items=data.groceries.master.filter(i=>i.category===cat); return html`<div key=${cat} style=${{marginBottom:16}}>
+        <div style=${{fontWeight:700,fontSize:12,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.8,marginBottom:7}}>${cat}</div>
+        <${Card} style=${{padding:'4px 0'}}>
+          ${items.map(i=>html`<div key=${i.id} style=${{display:'flex',alignItems:'center',gap:8,padding:'10px 15px',borderBottom:`1px solid ${C.border}`}}>
+            <span style=${{flex:1,fontSize:14,color:C.text}}>${i.name}</span>
+            ${i.note&&html`<span style=${{fontSize:12,color:C.textMuted}}>${i.note}</span>`}
+            <${Btn} variant="ghost" small onClick=${()=>openModal('master',i)}>✎<//>
+            <${Btn} variant="ghost" small onClick=${()=>del('master',i.id)}>✕<//>
+          </div>`)}
+        <//>
+      </div>`; })}
+    </div>`}
+    ${tab==='fridge'&&html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      ${data.groceries.fridge.map(i=>{ const du=daysUntil(i.expires); const ec=du<0?'red':du<=1?'coral':du<=3?'amber':'sage';
+        return html`<${Card} key=${i.id} style=${{padding:'13px 15px'}}>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style=${{flex:1}}>
+              <div style=${{fontWeight:600,fontSize:15,color:C.text}}>${i.name}</div>
+              ${i.note&&html`<div style=${{fontSize:13,color:C.textMuted,marginTop:2}}>${i.note}</div>`}
+              <div style=${{display:'flex',gap:8,marginTop:6,alignItems:'center'}}>
+                <span style=${{fontSize:12,color:C.textMuted}}>Added ${fmt(i.added)}</span>
+                ${i.expires&&html`<${Badge} color=${ec} small>${du<0?'Expired':du===0?'Today':du===1?'Tomorrow':`${du}d left`}<//>` }
+              </div>
+            </div>
+            <div style=${{display:'flex',gap:4}}>
+              <${Btn} variant="ghost" small onClick=${()=>openModal('fridge',i)}>✎<//>
+              <${Btn} variant="ghost" small onClick=${()=>del('fridge',i.id)}>✕<//>
+            </div>
+          </div>
+        <//>`;} )}
+      ${data.groceries.fridge.length===0&&html`<${Card}><p style=${{color:C.textMuted,textAlign:'center'}}>Nothing tracked!</p><//>` }
+    </div>`}
+    <${Modal} title="Item" open=${!!modal} onClose=${()=>setModal(null)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Item Name" value=${f.name||''} onChange=${v=>setF({...f,name:v})} required=${true}/>
+        ${modal==='master'&&html`<div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})} placeholder="Dairy, Produce, Pantry..."/>
+          <${Inp} label="Tags" value=${f.tags||''} onChange=${v=>setF({...f,tags:v})} placeholder="baby, organic..."/>
+          <${Inp} label="Note" value=${f.note||''} onChange=${v=>setF({...f,note:v})} placeholder="Brand..."/>
+        </div>`}
+        ${modal==='weekly'&&html`<${Inp} label="Quantity" value=${f.qty||''} onChange=${v=>setF({...f,qty:v})} placeholder="1 gallon..."/>` }
+        ${modal==='fridge'&&html`<div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <${Inp} label="Added" type="date" value=${f.added||today()} onChange=${v=>setF({...f,added:v})}/>
+            <${Inp} label="Expires" type="date" value=${f.expires||''} onChange=${v=>setF({...f,expires:v})}/>
+          </div>
+          <${Inp} label="Note" value=${f.note||''} onChange=${v=>setF({...f,note:v})}/>
+        </div>`}
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} variant="outline" onClick=${()=>setModal(null)}>Cancel<//>
+          <${Btn} onClick=${save}>Save<//>
+        </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── KITCHEN ───────────────────────────────────────────────────────────────────
+function Kitchen({data,updateData}) {
+  const [tab,setTab] = useState('recipes');
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [view,setView] = useState(null);
+  const [f,setF] = useState({name:'',category:'Dinner',servings:4,prepTime:'',cookTime:'',tags:'',ingredients:'',instructions:'',note:'',nutrition:{calories:0,protein:0,carbs:0,fat:0}});
+  const [aiLoading,setAiLoading] = useState(false);
+  const [mpWeek,setMpWeek] = useState(()=>{ const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().split('T')[0]; });
+  const [mpCell,setMpCell] = useState(null);
+  const [mpCustomText,setMpCustomText] = useState('');
+  const openModal = item => { setEdit(item||null); setF(item?{...item}:{name:'',category:'Dinner',servings:4,prepTime:'',cookTime:'',tags:'',ingredients:'',instructions:'',note:'',nutrition:{calories:0,protein:0,carbs:0,fat:0}}); setModal(true); };
+  const save = () => { if(!f.name) return; updateData({recipes:edit?data.recipes.map(r=>r.id===edit.id?{...f,id:edit.id}:r):[...data.recipes,{...f,id:uid()}]}); setModal(false); };
+  const del = id => { updateData({recipes:data.recipes.filter(r=>r.id!==id)}); setView(null); };
+  const download = () => {
+    const txt = data.recipes.map(r=>`${r.name}\n${'='.repeat(r.name.length)}\n\nINGREDIENTS:\n${r.ingredients}\n\nINSTRUCTIONS:\n${r.instructions}\n\n${'─'.repeat(40)}\n`).join('\n');
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'})); a.download='My_Recipes.txt'; a.click();
+  };
+
+// const nutrition = await response.json();
+//   console.log('Nutrition data received:', nutrition);
+
+//   setF(prev => ({
+//     ...prev,
+//     nutrition: {
+//       calories: Number(nutrition.calories) || 0,
+//       protein: Number(nutrition.protein) || 0,
+//       carbs: Number(nutrition.carbs) || 0,
+//       fat: Number(nutrition.fat) || 0
+//     }
+//   }));
+const calcNutrition = async () => {
+  console.log('AI Calc clicked!');
+  if (!f.ingredients) return;
+  setAiLoading(true);
+  try {
+    const response = await fetch('/api/nutrition', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await auth.currentUser.getIdToken()}` },
+      body: JSON.stringify({ 
+        ingredients: f.ingredients, 
+        servings: f.servings || 1 
+      })
+    });
+    
+    if (!response.ok) throw new Error('Failed to calculate nutrition');
+    
+    const nutrition = await response.json();
+    console.log('Nutrition data received:', nutrition);
+    setF(prev => ({
+      ...prev,
+      nutrition: {
+        calories: Number(nutrition.calories) || 0,
+        protein: Number(nutrition.protein) || 0,
+        carbs: Number(nutrition.carbs) || 0,
+        fat: Number(nutrition.fat) || 0
+      }
+    }));
+  } catch (error) {
+    console.error("Nutrition calc failed:", error);
+  }
+  setAiLoading(false);
+};
+  const wDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d,i)=>{ const dt=new Date(mpWeek+'T00:00:00'); dt.setDate(dt.getDate()+i); return {day:d,short:d.slice(0,3),date:dt.toISOString().split('T')[0]}; });
+  const getMealItems = (day,who,slot) => {
+    const v = data.mealPlan?.[mpWeek]?.[day]?.[who]?.[slot];
+    if(!v) return [];
+    return Array.isArray(v) ? v : [v]; // backward-compatible with old single-string entries
+  };
+  const setMealItems = (day,who,slot,items) => {
+    const mp={...data.mealPlan}; if(!mp[mpWeek])mp[mpWeek]={}; if(!mp[mpWeek][day])mp[mpWeek][day]={}; if(!mp[mpWeek][day][who])mp[mpWeek][day][who]={};
+    mp[mpWeek][day][who]={...mp[mpWeek][day][who],[slot]:items}; updateData({mealPlan:mp});
+  };
+  const toggleMealItem = (day,who,slot,name) => {
+    const cur = getMealItems(day,who,slot);
+    setMealItems(day,who,slot, cur.includes(name) ? cur.filter(x=>x!==name) : [...cur,name]);
+  };
+  const addCustomMealItem = (day,who,slot,name) => {
+    const n=(name||'').trim(); if(!n) return;
+    const cur = getMealItems(day,who,slot);
+    if(cur.includes(n)) return;
+    setMealItems(day,who,slot,[...cur,n]);
+  };
+  const removeMealItem = (day,who,slot,name) => {
+    setMealItems(day,who,slot,getMealItems(day,who,slot).filter(x=>x!==name));
+  };
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Kitchen</h2>
+      ${tab==='recipes'&&html`<div style=${{display:'flex',gap:6}}><${Btn} variant="outline" small onClick=${download}>⬇<//>  <${Btn} small onClick=${()=>openModal(null)}>+ Recipe<//>  </div>`}
+    </div>
+    <div style=${{display:'flex',gap:6,marginBottom:16}}>
+      ${[['recipes','🍳 Recipes'],['mealplan','📅 Meal Plan']].map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} style=${{border:`1.5px solid ${tab===k?C.sage:C.border}`,background:tab===k?C.sage:'transparent',color:tab===k?'#fff':C.textMuted,borderRadius:8,padding:'8px 16px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit'}}>${l}</button>`)}
+    </div>
+    ${tab==='recipes'&&html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      ${data.recipes.map(r=>html`<${Card} key=${r.id} onClick=${()=>setView(r)} style=${{cursor:'pointer',padding:'14px 16px'}}>
+        <div style=${{fontWeight:700,fontSize:16,color:C.text,marginBottom:6}}>${r.name}</div>
+        <div style=${{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+          <${Badge} color="sage" small>${r.category}<//>
+          <${Badge} color="blue" small>⏱ ${r.prepTime}+${r.cookTime}<//>
+          <${Badge} color="amber" small>👤 ${r.servings}<//>
+        </div>
+        ${r.nutrition&&html`<div style=${{display:'flex',gap:10,background:C.sageLt,borderRadius:8,padding:'7px 12px'}}>
+          ${[['Cal',r.nutrition.calories,''],['Pro',r.nutrition.protein,'g'],['Carb',r.nutrition.carbs,'g'],['Fat',r.nutrition.fat,'g']].map(([l,v,u])=>html`<div key=${l} style=${{textAlign:'center',flex:1}}><div style=${{fontSize:13,fontWeight:700,color:C.sage}}>${v}${u}</div><div style=${{fontSize:10,color:C.textMuted}}>${l}</div></div>`)}
+        </div>`}
+      <//>` )}
+    </div>`}
+    ${tab==='mealplan'&&html`<div>
+      <div style=${{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+        <span style=${{fontWeight:600,color:C.text,fontSize:14}}>Week of</span>
+        <input type="date" value=${mpWeek} onChange=${e=>setMpWeek(e.target.value)} style=${{border:`1.5px solid ${C.border}`,borderRadius:8,padding:'8px 12px',fontSize:14,fontFamily:'inherit'}}/>
+      </div>
+      ${[['Adults','adults',['Breakfast','Lunch','Dinner']],[(data.baby.name||'Child')+' 🌟','baby',['Breakfast','Snack 1','Lunch','Snack 2','Dinner']]].map(([label,who,slots])=>html`<div key=${who} style=${{marginBottom:24}}>
+        <div style=${{fontWeight:700,fontSize:15,color:C.text,marginBottom:10,paddingBottom:6,borderBottom:`2px solid ${who==='baby'?C.amber:C.sage}`}}>${label}</div>
+        <div style=${{overflowX:'auto'}}>
+          <table style=${{width:'100%',minWidth:480,borderCollapse:'collapse'}}>
+            <thead><tr>
+              <th style=${{padding:'6px 8px',fontSize:11,fontWeight:700,color:C.textMuted,textAlign:'left',minWidth:70}}>Meal</th>
+              ${wDays.map(d=>html`<th key=${d.day} style=${{padding:'6px 4px',fontSize:11,fontWeight:700,color:d.date===today()?C.sage:C.textMuted,textAlign:'center',minWidth:58}}>${d.short}</th>`)}
+            </tr></thead>
+            <tbody>${slots.map(slot=>html`<tr key=${slot}>
+              <td style=${{padding:'4px 8px',fontSize:12,fontWeight:600,color:C.textMuted,whiteSpace:'nowrap'}}>${slot}</td>
+              ${wDays.map(d=>{ const items=getMealItems(d.day,who,slot); return html`<td key=${d.day} style=${{padding:'3px 4px'}}>
+                <div onClick=${()=>{setMpCell({day:d.day,who,slot});setMpCustomText('');}}
+                  style=${{width:'100%',minHeight:30,boxSizing:'border-box',border:`1px solid ${C.border}`,borderRadius:5,padding:'4px 5px',fontSize:10.5,fontFamily:'inherit',background:C.cream,cursor:'pointer',display:'flex',flexWrap:'wrap',gap:3,alignItems:'center'}}>
+                  ${items.length ? items.map(it=>html`<span key=${it} style=${{background:C.sageLt,color:C.sage,borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:600,whiteSpace:'nowrap'}}>${it}</span>`) : html`<span style=${{color:C.textMuted}}>···</span>`}
+                </div>
+              </td>`; })}
+            </tr>`)}</tbody>
+          </table>
+        </div>
+      </div>`)}
+    </div>`}
+    <${Modal} title=${mpCell?`${mpCell.slot} · ${wDays.find(d=>d.day===mpCell.day)?.short||''}`:''} open=${!!mpCell} onClose=${()=>setMpCell(null)}>
+      ${mpCell&&html`<div>
+        <div style=${{display:'flex',flexWrap:'wrap',gap:6,marginBottom:16,minHeight:32}}>
+          ${getMealItems(mpCell.day,mpCell.who,mpCell.slot).length ? getMealItems(mpCell.day,mpCell.who,mpCell.slot).map(it=>html`<span key=${it} style=${{display:'flex',alignItems:'center',gap:5,background:C.sageLt,color:C.sage,borderRadius:7,padding:'6px 8px 6px 11px',fontSize:13,fontWeight:600}}>
+            ${it}<button onClick=${()=>removeMealItem(mpCell.day,mpCell.who,mpCell.slot,it)} style=${{background:'none',border:'none',cursor:'pointer',color:C.sage,fontSize:14,padding:0,lineHeight:1}}>✕</button>
+          </span>`) : html`<span style=${{fontSize:13,color:C.textMuted,fontStyle:'italic'}}>Nothing added yet</span>`}
+        </div>
+        <div style=${{display:'flex',gap:8,marginBottom:18}}>
+          <input value=${mpCustomText} onInput=${e=>setMpCustomText(e.target.value)} list="mp-recipe-list"
+            onKeyDown=${e=>{ if(e.key==='Enter'){ addCustomMealItem(mpCell.day,mpCell.who,mpCell.slot,mpCustomText); setMpCustomText(''); } }}
+            placeholder="Add item (e.g. Dal, Rice, Sabji)…"
+            style=${{flex:1,border:`1.5px solid ${C.border}`,borderRadius:8,padding:'9px 12px',fontSize:14,fontFamily:'inherit',background:C.cream,color:C.text}}/>
+          <${Btn} small onClick=${()=>{addCustomMealItem(mpCell.day,mpCell.who,mpCell.slot,mpCustomText); setMpCustomText('');}}>Add<//>
+        </div>
+        <datalist id="mp-recipe-list">${data.recipes.map(r=>html`<option key=${r.id} value=${r.name}/>`)}</datalist>
+        ${data.recipes.length>0&&html`<div>
+          <div style=${{fontSize:12,fontWeight:700,color:C.textMuted,marginBottom:8,letterSpacing:0.3}}>YOUR RECIPES</div>
+          <div style=${{display:'flex',flexWrap:'wrap',gap:6}}>
+            ${data.recipes.map(r=>{ const active=getMealItems(mpCell.day,mpCell.who,mpCell.slot).includes(r.name); return html`<button key=${r.id} onClick=${()=>toggleMealItem(mpCell.day,mpCell.who,mpCell.slot,r.name)}
+              style=${{border:`1.5px solid ${active?C.sage:C.border}`,background:active?C.sage:'transparent',color:active?'#fff':C.text,borderRadius:7,padding:'6px 11px',fontSize:12.5,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>${active?'✓ ':''}${r.name}</button>`; })}
+          </div>
+        </div>`}
+        <div style=${{display:'flex',justifyContent:'flex-end',marginTop:20}}>
+          <${Btn} small onClick=${()=>setMpCell(null)}>Done<//>
+        </div>
+      </div>`}
+    <//>
+    <${Modal} title=${view?.name||''} open=${!!view} onClose=${()=>setView(null)}>
+      ${view&&html`<div>
+        <div style=${{display:'flex',gap:6,flexWrap:'wrap',marginBottom:14}}>
+          <${Badge} color="sage">${view.category}<//>
+          <${Badge} color="amber">Serves ${view.servings}<//>
+          <${Badge} color="blue">Prep ${view.prepTime}<//>
+          <${Badge} color="purple">Cook ${view.cookTime}<//>
+        </div>
+        ${view.nutrition&&html`<div style=${{display:'flex',gap:10,background:C.sageLt,borderRadius:10,padding:'10px 14px',marginBottom:14}}>
+          ${[['Calories',view.nutrition.calories,''],['Protein',view.nutrition.protein,'g'],['Carbs',view.nutrition.carbs,'g'],['Fat',view.nutrition.fat,'g']].map(([l,v,u])=>html`<div key=${l} style=${{textAlign:'center',flex:1}}><div style=${{fontSize:18,fontWeight:700,color:C.sage}}>${v}${u}</div><div style=${{fontSize:11,color:C.textMuted}}>${l}</div></div>`)}
+        </div>`}
+        <div style=${{marginBottom:12}}><div style=${{fontWeight:700,fontSize:13,marginBottom:6,color:C.text}}>Ingredients</div><div style=${{fontSize:14,color:C.text,lineHeight:1.7,whiteSpace:'pre-wrap',background:C.cream,borderRadius:8,padding:'10px 12px'}}>${view.ingredients}</div></div>
+        <div style=${{marginBottom:12}}><div style=${{fontWeight:700,fontSize:13,marginBottom:6,color:C.text}}>Instructions</div><div style=${{fontSize:14,color:C.text,lineHeight:1.7,whiteSpace:'pre-wrap',background:C.cream,borderRadius:8,padding:'10px 12px'}}>${view.instructions}</div></div>
+        ${view.note&&html`<div style=${{fontSize:13,color:C.textMuted,fontStyle:'italic',background:C.amberLt,borderRadius:8,padding:'10px 12px',marginBottom:12}}>💡 ${view.note}</div>`}
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} danger small onClick=${()=>del(view.id)}>Delete<//>
+          <${Btn} variant="outline" small onClick=${()=>{openModal(view);setView(null);}}>Edit<//>
+        </div>
+      </div>`}
+    <//>
+    <${Modal} title=${edit?'Edit Recipe':'New Recipe'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Recipe Name" value=${f.name} onChange=${v=>setF({...f,name:v})} required=${true}/>
+          <${Inp} label="Category" value=${f.category} onChange=${v=>setF({...f,category:v})} placeholder="Indian, Breakfast..."/>
+        </div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+          <${Inp} label="Servings" type="number" value=${f.servings} onChange=${v=>setF({...f,servings:+v})}/>
+          <${Inp} label="Prep Time" value=${f.prepTime} onChange=${v=>setF({...f,prepTime:v})} placeholder="10 min"/>
+          <${Inp} label="Cook Time" value=${f.cookTime} onChange=${v=>setF({...f,cookTime:v})} placeholder="30 min"/>
+        </div>
+        <${Inp} label="Tags" value=${f.tags} onChange=${v=>setF({...f,tags:v})} placeholder="vegetarian, quick..."/>
+        <${Txa} label="Ingredients" value=${f.ingredients} onChange=${v=>setF({...f,ingredients:v})} rows=${4} placeholder="One per line..."/>
+        <${Txa} label="Instructions" value=${f.instructions} onChange=${v=>setF({...f,instructions:v})} rows=${4} placeholder="Step by step..."/>
+        <${Inp} label="Note" value=${f.note} onChange=${v=>setF({...f,note:v})} placeholder="Tips..."/>
+        <div>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <label style=${{fontSize:13,fontWeight:600,color:C.textMuted}}>Nutrition per serving</label>
+            <${Btn} variant="outline" small onClick=${calcNutrition}>${aiLoading?'⏳...':'✦ AI Calc'}<//>
+          </div>
+          <div style=${{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+            ${['calories','protein','carbs','fat'].map(k=>html`<${Inp} key=${k} label=${k[0].toUpperCase()+k.slice(1)} type="number" value=${f.nutrition?.[k]||''} onChange=${v=>setF({...f,nutrition:{...f.nutrition,[k]:+v}})}/>` )}
+          </div>
+        </div>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>
+          <${Btn} onClick=${save}>Save<//>
+        </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── HOME CARE ─────────────────────────────────────────────────────────────────
+function HomeCare({data,updateData}) {
+  const [tab,setTab] = useState('maintenance');
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [f,setF] = useState({});
+  const [cf,setCf] = useState('weekly');
+  const openM = item => { setEdit(item||null); setF(item||{task:'',frequency:'Monthly',lastDone:today(),nextDue:'',notes:''}); setModal(true); };
+  const saveM = () => { if(!f.task) return; updateData({maintenance:edit?data.maintenance.map(m=>m.id===edit.id?{...f,id:edit.id}:m):[...data.maintenance,{...f,id:uid()}]}); setModal(false); };
+  const delM = id => updateData({maintenance:data.maintenance.filter(m=>m.id!==id)});
+  const toggleC = (freq,id) => updateData({cleaning:{...data.cleaning,[freq]:data.cleaning[freq].map(t=>t.id===id?{...t,done:!t.done}:t)}});
+  const resetC = freq => updateData({cleaning:{...data.cleaning,[freq]:data.cleaning[freq].map(t=>({...t,done:false}))}});
+  const addC = freq => { const task=prompt('New task:'); if(task) updateData({cleaning:{...data.cleaning,[freq]:[...data.cleaning[freq],{id:uid(),task,done:false,assigned:'Me'}]}}); };
+  const sc = d => { const du=daysUntil(d); return du<0?'red':du<=3?'coral':du<=14?'amber':'sage'; };
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Home Care</h2>
+      ${tab==='maintenance'&&html`<${Btn} small onClick=${()=>openM(null)}>+ Add<//>`}
+    </div>
+    <div style=${{display:'flex',gap:6,marginBottom:16}}>
+      ${[['maintenance','🔧 Maintenance'],['cleaning','🧹 Cleaning']].map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} style=${{border:`1.5px solid ${tab===k?C.sage:C.border}`,background:tab===k?C.sage:'transparent',color:tab===k?'#fff':C.textMuted,borderRadius:8,padding:'8px 16px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit'}}>${l}</button>`)}
+    </div>
+    ${tab==='maintenance'&&html`<div style=${{display:'flex',flexDirection:'column',gap:8}}>
+      ${[...data.maintenance].sort((a,b)=>daysUntil(a.nextDue)-daysUntil(b.nextDue)).map(m=>html`<${Card} key=${m.id} style=${{padding:'13px 15px'}}>
+        <div style=${{display:'flex',alignItems:'flex-start',gap:10}}>
+          <div style=${{flex:1}}>
+            <div style=${{fontWeight:600,fontSize:15,color:C.text,marginBottom:3}}>${m.task}</div>
+            <div style=${{fontSize:12,color:C.textMuted,display:'flex',gap:10,flexWrap:'wrap'}}>
+              <span>🔄 ${m.frequency}</span>
+              ${m.lastDone&&html`<span>✓ ${fmt(m.lastDone)}</span>`}
+              ${m.nextDue&&html`<span>📅 ${fmt(m.nextDue)}</span>`}
+            </div>
+            ${m.notes&&html`<div style=${{fontSize:12,color:C.textMuted,marginTop:2}}>${m.notes}</div>`}
+          </div>
+          <div style=${{display:'flex',gap:6,alignItems:'center',flexShrink:0}}>
+            ${m.nextDue&&html`<${Badge} color=${sc(m.nextDue)} small>${daysUntil(m.nextDue)<0?'Overdue':daysUntil(m.nextDue)===0?'Today':`${daysUntil(m.nextDue)}d`}<//>` }
+            <${Btn} variant="ghost" small onClick=${()=>openM(m)}>✎<//>
+            <${Btn} variant="ghost" small onClick=${()=>delM(m.id)}>✕<//>
+          </div>
+        </div>
+      <//>` )}
+    </div>`}
+    ${tab==='cleaning'&&html`<div>
+      <div style=${{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
+        ${['daily','weekly','monthly','quarterly'].map(v=>html`<button key=${v} onClick=${()=>setCf(v)} style=${{border:`1.5px solid ${cf===v?C.sage:C.border}`,background:cf===v?C.sageLt:'transparent',color:cf===v?C.sage:C.textMuted,borderRadius:8,padding:'6px 14px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit',textTransform:'capitalize'}}>${v}</button>`)}
+      </div>
+      <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <span style=${{color:C.textMuted,fontSize:13}}>${data.cleaning[cf].filter(t=>t.done).length}/${data.cleaning[cf].length} done</span>
+        <div style=${{display:'flex',gap:6}}>
+          <${Btn} variant="outline" small onClick=${()=>resetC(cf)}>Reset<//>
+          <${Btn} small onClick=${()=>addC(cf)}>+ Add<//>
+        </div>
+      </div>
+      <${Card}>
+        ${data.cleaning[cf].map(t=>html`<div key=${t.id} style=${{display:'flex',alignItems:'center',gap:11,padding:'11px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div onClick=${()=>toggleC(cf,t.id)} style=${{width:22,height:22,borderRadius:6,border:`2px solid ${t.done?C.sage:C.borderMd}`,background:t.done?C.sage:'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+            ${t.done&&html`<span style=${{color:'#fff',fontSize:12}}>✓</span>`}
+          </div>
+          <span style=${{flex:1,fontSize:15,color:t.done?C.textMuted:C.text,textDecoration:t.done?'line-through':'none'}}>${t.task}</span>
+          ${t.assigned&&html`<${Badge} small>${t.assigned}<//>` }
+        </div>`)}
+      <//>
+    </div>`}
+    <${Modal} title=${edit?'Edit Task':'New Maintenance Task'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Task" value=${f.task||''} onChange=${v=>setF({...f,task:v})} required=${true}/>
+        <${Sel} label="Frequency" value=${f.frequency||'Monthly'} onChange=${v=>setF({...f,frequency:v})} options=${['Weekly','Monthly','Biannual','Annual','Quarterly','As needed']}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Last Done" type="date" value=${f.lastDone||''} onChange=${v=>setF({...f,lastDone:v})}/>
+          <${Inp} label="Next Due" type="date" value=${f.nextDue||''} onChange=${v=>setF({...f,nextDue:v})}/>
+        </div>
+        <${Inp} label="Notes" value=${f.notes||''} onChange=${v=>setF({...f,notes:v})}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>
+          <${Btn} onClick=${saveM}>Save<//>
+        </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── BABY CORNER ───────────────────────────────────────────────────────────────
+function BabyCorner({data,updateData}) {
+  const [tab,setTab] = useState('lessons');
+  const [genModal,setGenModal] = useState(false);
+  const [viewPlan,setViewPlan] = useState(null);
+  const [genF,setGenF] = useState({weekNum:'',theme:'',ageMonths:18,color:'',animal:'',letter:'',bodyPart:'',shape:'',number:''});
+  const [aiLoading,setAiLoading] = useState(false);
+  const [aiDone,setAiDone] = useState(false);
+  const [solidModal,setSolidModal] = useState(false);
+  const [sEdit,setSEdit] = useState(null);
+  const [sF,setSF] = useState({});
+  const [invModal,setInvModal] = useState(false);
+  const [iEdit,setIEdit] = useState(null);
+  const [iF,setIF] = useState({});
+  const [profileModal,setProfileModal] = useState(false);
+  const [profileF,setProfileF] = useState({name:data.baby.name||'',dob:data.baby.dob||''});
+  const [mileModal,setMileModal] = useState(false);
+  const [mEdit,setMEdit] = useState(null);
+  const [mF,setMF] = useState({});
+  const babyAge = data.baby.dob ? Math.max(0,Math.floor((new Date()-new Date(data.baby.dob+'T00:00:00'))/(1000*60*60*24*30.44))) : null;
+  const vp = viewPlan ? data.baby.lessonPlans.find(p=>p.id===viewPlan) : null;
+  const genPlan = async () => {
+    if (!genF.theme) return; setAiLoading(true); setAiDone(false);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const res = await fetch('/api/lesson-plan',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(genF)});
+      const d = await res.json(); if(!res.ok) throw new Error(d.error||'Generation failed');
+      const activities=(d.activities||[]).map(a=>({...a,id:uid()}));
+      const plan={id:uid(),weekNum:+genF.weekNum||data.baby.lessonPlans.length+1,theme:genF.theme,color:genF.color,animal:genF.animal,letter:genF.letter,bodyPart:genF.bodyPart,shape:genF.shape,number:genF.number,activities};
+      updateData({baby:{...data.baby,lessonPlans:[...data.baby.lessonPlans,plan]}}); setAiDone(true);
+    } catch(e) { alert(e.message||'Error generating. Try again.'); }
+    setAiLoading(false);
+  };
+  const saveS = () => { if(!sF.food) return; updateData({baby:{...data.baby,solids:sEdit?data.baby.solids.map(s=>s.id===sEdit.id?{...sF,id:sEdit.id}:s):[...data.baby.solids,{...sF,id:uid()}]}}); setSolidModal(false); };
+  const saveI = () => { if(!iF.item) return; updateData({baby:{...data.baby,inventory:iEdit?data.baby.inventory.map(i=>i.id===iEdit.id?{...iF,id:iEdit.id}:i):[...data.baby.inventory,{...iF,id:uid()}]}}); setInvModal(false); };
+  const saveM = () => { if(!mF.milestone) return; updateData({baby:{...data.baby,milestones:mEdit?data.baby.milestones.map(m=>m.id===mEdit.id?{...mF,id:mEdit.id}:m):[...data.baby.milestones,{...mF,id:uid()}]}}); setMileModal(false); };
+  const rc={loved:'sage',liked:'blue',neutral:'amber',disliked:'red',allergic:'red'};
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18,gap:10}}>
+      <div><h2 style=${{margin:'0 0 2px',fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>👶 ${data.baby.name?data.baby.name+"'s":'Child'} Corner</h2>
+      <p style=${{margin:0,fontSize:13,color:C.textMuted}}>${babyAge===null?'Add a child name and birth date.':babyAge+' months old · Born '+fmt(data.baby.dob)}</p></div>
+      <${Btn} variant="outline" small onClick=${()=>{setProfileF({name:data.baby.name||'',dob:data.baby.dob||''});setProfileModal(true);}}>Profile<//>
+    </div>
+    <div style=${{display:'flex',gap:6,marginBottom:16,overflowX:'auto'}}>
+      ${[['lessons','📚 Lessons'],['solids','🥑 Solids'],['inventory','🛍 Inventory'],['milestones','⭐ Milestones']].map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} style=${{border:`1.5px solid ${tab===k?C.sage:C.border}`,background:tab===k?C.sage:'transparent',color:tab===k?'#fff':C.textMuted,borderRadius:8,padding:'8px 14px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit',flexShrink:0}}>${l}</button>`)}
+    </div>
+    ${tab==='lessons'&&!vp&&html`<div>
+      <div style=${{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+        <${Btn} onClick=${()=>{setGenF({weekNum:data.baby.lessonPlans.length+1,theme:'',ageMonths:babyAge,color:'',animal:'',letter:'',bodyPart:'',shape:'',number:''});setAiDone(false);setGenModal(true);}}>✦ Generate with AI<//>
+      </div>
+      <div style=${{display:'flex',flexDirection:'column',gap:10}}>
+        ${data.baby.lessonPlans.map(plan=>html`<${Card} key=${plan.id} onClick=${()=>setViewPlan(plan.id)} style=${{cursor:'pointer',background:`linear-gradient(135deg,${C.amberLt},${C.sageLt})`,padding:'14px 16px'}}>
+          <div style=${{fontWeight:700,fontSize:12,color:C.amber,marginBottom:2}}>WEEK ${plan.weekNum}</div>
+          <div style=${{fontSize:17,fontWeight:700,color:C.text,marginBottom:8}}>${plan.theme}</div>
+          <div style=${{display:'flex',gap:6,flexWrap:'wrap'}}>
+            ${[plan.color,plan.animal,plan.letter,plan.bodyPart].filter(Boolean).map((x,i)=>html`<${Badge} key=${i} color=${['coral','sage','blue','purple'][i]} small>${x}<//>` )}
+          </div>
+          <div style=${{marginTop:8,fontSize:12,color:C.textMuted}}>${plan.activities?.length||0} activities</div>
+        <//>` )}
+        ${data.baby.lessonPlans.length===0&&html`<${Card}><p style=${{color:C.textMuted,textAlign:'center'}}>Generate your first lesson plan!</p><//>` }
+      </div>
+    </div>`}
+    ${tab==='lessons'&&vp&&html`<div>
+      <${Btn} variant="ghost" onClick=${()=>setViewPlan(null)}>← Back<//>
+      <div style=${{marginTop:14}}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+          <div>
+            <div style=${{fontSize:12,fontWeight:700,color:C.amber}}>WEEK ${vp.weekNum}</div>
+            <h3 style=${{margin:'2px 0 8px',fontSize:20,fontWeight:700,color:C.text}}>${vp.theme}</h3>
+            <div style=${{display:'flex',gap:6,flexWrap:'wrap'}}>
+              ${[['Color',vp.color],['Animal',vp.animal],['Letter',vp.letter],['Body Part',vp.bodyPart],['Shape',vp.shape],['Number',vp.number]].filter(([,v])=>v).map(([l,v])=>html`<div key=${l} style=${{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:'4px 10px',fontSize:12}}><span style=${{color:C.textMuted}}>${l}: </span><span style=${{fontWeight:700,color:C.text}}>${v}</span></div>`)}
+            </div>
+          </div>
+          <${Btn} danger small onClick=${()=>{updateData({baby:{...data.baby,lessonPlans:data.baby.lessonPlans.filter(p=>p.id!==vp.id)}});setViewPlan(null);}}>Delete<//>
+        </div>
+        <div style=${{display:'flex',flexDirection:'column',gap:10}}>
+          ${(vp.activities||[]).map(a=>html`<${Card} key=${a.id} style=${{background:C.cream}}>
+            <div style=${{display:'flex',gap:6,marginBottom:7}}><${Badge} color="sage" small>${a.day}<//>  <${Badge} color="amber" small>${a.time}<//>  </div>
+            <div style=${{fontWeight:700,fontSize:15,color:C.text,marginBottom:5}}>${a.title}</div>
+            <div style=${{fontSize:13,color:C.textMuted,lineHeight:1.6,marginBottom:a.materials?7:0}}>${a.desc||a.description}</div>
+            ${a.materials&&html`<div style=${{fontSize:12,color:C.blue,background:C.blueLt,borderRadius:6,padding:'5px 10px'}}>🎨 ${a.materials}</div>`}
+          <//>` )}
+        </div>
+      </div>
+    </div>`}
+    ${tab==='solids'&&html`<div>
+      <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+        <span style=${{fontSize:13,color:C.textMuted}}>${data.baby.solids.length} foods introduced</span>
+        <${Btn} small onClick=${()=>{setSEdit(null);setSF({food:'',ageIntro:'',reaction:'liked',allergen:false,notes:''});setSolidModal(true);}}>+ Add Food<//>
+      </div>
+      <div style=${{display:'flex',flexDirection:'column',gap:8}}>
+        ${data.baby.solids.map(s=>html`<${Card} key=${s.id} style=${{padding:'12px 15px'}}>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style=${{flex:1}}>
+              <div style=${{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>${s.food}</div>
+              <div style=${{display:'flex',gap:6,flexWrap:'wrap',marginBottom:4}}>
+                <${Badge} color=${rc[s.reaction]||'sage'} small>${s.reaction}<//>
+                ${s.allergen&&html`<${Badge} color="coral" small>⚠ allergen<//>` }
+              </div>
+              <div style=${{fontSize:12,color:C.textMuted}}>${s.ageIntro}${s.notes?` · ${s.notes}`:''}</div>
+            </div>
+            <div style=${{display:'flex',gap:4}}>
+              <${Btn} variant="ghost" small onClick=${()=>{setSEdit(s);setSF({...s});setSolidModal(true);}}>✎<//>
+              <${Btn} variant="ghost" small onClick=${()=>updateData({baby:{...data.baby,solids:data.baby.solids.filter(x=>x.id!==s.id)}})}>✕<//>
+            </div>
+          </div>
+        <//>` )}
+      </div>
+      <${Modal} title="Food Entry" open=${solidModal} onClose=${()=>setSolidModal(false)}>
+        <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Food" value=${sF.food||''} onChange=${v=>setSF({...sF,food:v})} required=${true}/>
+          <${Inp} label="Age Introduced" value=${sF.ageIntro||''} onChange=${v=>setSF({...sF,ageIntro:v})} placeholder="6 months..."/>
+          <${Sel} label="Reaction" value=${sF.reaction||'liked'} onChange=${v=>setSF({...sF,reaction:v})} options=${['loved','liked','neutral','disliked','allergic']}/>
+          <div style=${{display:'flex',alignItems:'center',gap:10}}><input type="checkbox" id="alg" checked=${!!sF.allergen} onChange=${e=>setSF({...sF,allergen:e.target.checked})} style=${{width:16,height:16}}/><label for="alg" style=${{fontSize:14,color:C.text,cursor:'pointer'}}>Common allergen (egg, milk, peanut, wheat, soy)</label></div>
+          <${Inp} label="Notes" value=${sF.notes||''} onChange=${v=>setSF({...sF,notes:v})}/>
+          <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setSolidModal(false)}>Cancel<//>  <${Btn} onClick=${saveS}>Save<//>  </div>
+        </div>
+      <//>
+    </div>`}
+    ${tab==='inventory'&&html`<div>
+      <div style=${{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+        <${Btn} small onClick=${()=>{setIEdit(null);setIF({item:'',status:'need',brand:'',priority:'medium',notes:''});setInvModal(true);}}>+ Add Item<//>
+      </div>
+      <div style=${{display:'flex',flexDirection:'column',gap:8}}>
+        ${data.baby.inventory.map(i=>html`<${Card} key=${i.id} style=${{padding:'12px 15px',borderLeft:`3px solid ${i.priority==='high'?C.coral:i.priority==='done'?C.sage:C.amber}`}}>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style=${{flex:1}}>
+              <div style=${{fontWeight:600,fontSize:15,color:i.status==='have'?C.textMuted:C.text,textDecoration:i.status==='have'?'line-through':'none'}}>${i.item}</div>
+              <div style=${{display:'flex',gap:6,marginTop:4,flexWrap:'wrap'}}>
+                <${Badge} color=${i.status==='have'?'sage':'coral'} small>${i.status==='have'?'✓ Have it':'Need to buy'}<//>
+                ${i.brand&&html`<${Badge} color="blue" small>${i.brand}<//>` }
+              </div>
+              ${i.notes&&html`<div style=${{fontSize:12,color:C.textMuted,marginTop:3}}>${i.notes}</div>`}
+            </div>
+            <div style=${{display:'flex',gap:4}}>
+              <${Btn} variant="ghost" small onClick=${()=>{setIEdit(i);setIF({...i});setInvModal(true);}}>✎<//>
+              <${Btn} variant="ghost" small onClick=${()=>updateData({baby:{...data.baby,inventory:data.baby.inventory.filter(x=>x.id!==i.id)}})}>✕<//>
+            </div>
+          </div>
+        <//>` )}
+      </div>
+      <${Modal} title="Inventory Item" open=${invModal} onClose=${()=>setInvModal(false)}>
+        <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Item" value=${iF.item||''} onChange=${v=>setIF({...iF,item:v})} required=${true}/>
+          <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <${Sel} label="Status" value=${iF.status||'need'} onChange=${v=>setIF({...iF,status:v})} options=${['need','have','ordered']}/>
+            <${Sel} label="Priority" value=${iF.priority||'medium'} onChange=${v=>setIF({...iF,priority:v})} options=${['high','medium','low','done']}/>
+          </div>
+          <${Inp} label="Brand / Where to buy" value=${iF.brand||''} onChange=${v=>setIF({...iF,brand:v})}/>
+          <${Inp} label="Notes" value=${iF.notes||''} onChange=${v=>setIF({...iF,notes:v})}/>
+          <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setInvModal(false)}>Cancel<//>  <${Btn} onClick=${saveI}>Save<//>  </div>
+        </div>
+      <//>
+    </div>`}
+    ${tab==='milestones'&&html`<div>
+      <div style=${{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+        <${Btn} small onClick=${()=>{setMEdit(null);setMF({milestone:'',date:today(),note:''});setMileModal(true);}}>+ Add<//>
+      </div>
+      <div style=${{position:'relative',paddingLeft:20}}>
+        <div style=${{position:'absolute',left:6,top:0,bottom:0,width:2,background:C.sageMd}}></div>
+        ${[...data.baby.milestones].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(m=>html`<div key=${m.id} style=${{position:'relative',marginBottom:12}}>
+          <div style=${{position:'absolute',left:-18,top:14,width:10,height:10,borderRadius:'50%',background:C.sage,border:`2px solid ${C.cream}`}}></div>
+          <${Card} style=${{marginLeft:4}}>
+            <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+              <div>
+                <div style=${{fontWeight:700,fontSize:14,color:C.text}}>${m.milestone}</div>
+                <div style=${{fontSize:12,color:C.sage,marginTop:2}}>⭐ ${fmt(m.date)}</div>
+                ${m.note&&html`<div style=${{fontSize:13,color:C.textMuted,marginTop:3}}>${m.note}</div>`}
+              </div>
+              <div style=${{display:'flex',gap:4}}>
+                <${Btn} variant="ghost" small onClick=${()=>{setMEdit(m);setMF({...m});setMileModal(true);}}>✎<//>
+                <${Btn} variant="ghost" small onClick=${()=>updateData({baby:{...data.baby,milestones:data.baby.milestones.filter(x=>x.id!==m.id)}})}>✕<//>
+              </div>
+            </div>
+          <//>
+        </div>`)}
+      </div>
+      <${Modal} title="Milestone" open=${mileModal} onClose=${()=>setMileModal(false)}>
+        <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Milestone" value=${mF.milestone||''} onChange=${v=>setMF({...mF,milestone:v})} required=${true}/>
+          <${Inp} label="Date" type="date" value=${mF.date||today()} onChange=${v=>setMF({...mF,date:v})}/>
+          <${Inp} label="Notes" value=${mF.note||''} onChange=${v=>setMF({...mF,note:v})} placeholder="A precious memory..."/>
+          <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setMileModal(false)}>Cancel<//>  <${Btn} onClick=${saveM}>Save<//>  </div>
+        </div>
+      <//>
+    </div>`}
+    <${Modal} title="Child Profile" open=${profileModal} onClose=${()=>setProfileModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}><${Inp} label="Name" value=${profileF.name||''} onChange=${v=>setProfileF({...profileF,name:v})}/><${Inp} label="Birth Date" type="date" value=${profileF.dob||''} onChange=${v=>setProfileF({...profileF,dob:v})}/><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setProfileModal(false)}>Cancel<//><${Btn} onClick=${()=>{updateData({baby:{...data.baby,...profileF}});setProfileModal(false);}}>Save<//></div></div>
+    <//>
+    <${Modal} title="✦ Generate Lesson Plan" open=${genModal} onClose=${()=>setGenModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <div style=${{background:C.purpleLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.purple}}>AI creates a full week of play-based activities for ${data.baby.name||'your child'}!</div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Week #" type="number" value=${genF.weekNum} onChange=${v=>setGenF({...genF,weekNum:v})}/>
+          <${Inp} label="Age (months)" type="number" value=${genF.ageMonths} onChange=${v=>setGenF({...genF,ageMonths:+v})}/>
+        </div>
+        <${Inp} label="Theme *" value=${genF.theme} onChange=${v=>setGenF({...genF,theme:v})} placeholder="Animals, Colors, Nature..." required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+          <${Inp} label="Color" value=${genF.color} onChange=${v=>setGenF({...genF,color:v})} placeholder="Red..."/>
+          <${Inp} label="Animal" value=${genF.animal} onChange=${v=>setGenF({...genF,animal:v})} placeholder="Dog..."/>
+          <${Inp} label="Letter" value=${genF.letter} onChange=${v=>setGenF({...genF,letter:v})} placeholder="Aa..."/>
+        </div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+          <${Inp} label="Body Part" value=${genF.bodyPart} onChange=${v=>setGenF({...genF,bodyPart:v})} placeholder="Nose..."/>
+          <${Inp} label="Shape" value=${genF.shape} onChange=${v=>setGenF({...genF,shape:v})} placeholder="Circle..."/>
+          <${Inp} label="Number" value=${genF.number} onChange=${v=>setGenF({...genF,number:v})} placeholder="One..."/>
+        </div>
+        <${Btn} onClick=${genPlan} disabled=${aiLoading||!genF.theme}>${aiLoading?'⏳ Generating...':'✦ Generate Activities'}<//>
+        ${aiDone&&html`<div style=${{background:C.greenLt,color:C.green,borderRadius:8,padding:'10px 14px',fontSize:13,fontWeight:600}}>✓ Saved! Close to view it.</div>`}
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── RECORDS ───────────────────────────────────────────────────────────────────
+function Records({data,updateData,user}) {
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [f,setF] = useState({});
+  const [reveal,setReveal] = useState({});
+  const open = item => { setEdit(item||null); setF(item?{...item}:{category:'',label:'',value:'',note:'',attachments:[]}); setModal(true); };
+  const save = () => { if(!f.label.trim()) return; const item={...f,id:edit?.id||uid(),attachments:f.attachments||[]}; updateData({records:edit?data.records.map(r=>r.id===edit.id?item:r):[...data.records,item]}); setModal(false); };
+  const del = async item => { if(!confirm('Delete this record and its files?'))return; await Promise.all((item.attachments||[]).map(a=>storage.ref(a.path).delete().catch(()=>{}))); updateData({records:data.records.filter(r=>r.id!==item.id)}); };
+  const updateAttachments = (id,attachments) => updateData({records:data.records.map(r=>r.id===id?{...r,attachments}:r)});
+  const cats = [...new Set(data.records.map(r=>r.category||'Uncategorized'))].sort();
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}><h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Personal Records</h2><${Btn} small onClick=${()=>open(null)}>+ Add<//></div>
+    <div style=${{background:C.amberLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.amber,marginBottom:16}}>🔒 Values are hidden on screen. Firebase login and private security rules protect the stored data.</div>
+    ${cats.map(cat=>html`<div key=${cat} style=${{marginBottom:20}}><div style=${{fontWeight:700,fontSize:12,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.8,marginBottom:8}}>${cat}</div><div style=${{display:'flex',flexDirection:'column',gap:9}}>
+      ${data.records.filter(r=>(r.category||'Uncategorized')===cat).map(r=>html`<${Card} key=${r.id} style=${{padding:'13px 16px'}}>
+        <div style=${{display:'flex',alignItems:'flex-start',gap:12}}><div style=${{flex:1,minWidth:0}}><div style=${{fontSize:12,fontWeight:600,color:C.textMuted}}>${r.label}</div><div style=${{fontSize:15,fontWeight:600,color:C.text,wordBreak:'break-word'}}>${reveal[r.id]?(r.value||'—'):'••••••••'}</div>${r.note&&html`<div style=${{fontSize:12,color:C.textMuted}}>${r.note}</div>`}</div><div style=${{display:'flex',gap:4}}><${Btn} variant="ghost" small onClick=${()=>setReveal(v=>({...v,[r.id]:!v[r.id]}))}>${reveal[r.id]?'🙈':'👁'}<//><${Btn} variant="ghost" small onClick=${()=>open(r)}>✎<//><${Btn} variant="ghost" small onClick=${()=>del(r)}>✕<//></div></div>
+        <${AttachmentManager} user=${user} area="records" parentId=${r.id} attachments=${r.attachments||[]} onChange=${a=>updateAttachments(r.id,a)}/>
+      <//>`)}
+    </div></div>`)}
+    ${data.records.length===0&&html`<${Card}><p style=${{textAlign:'center',color:C.textMuted}}>No records yet. Add one, then attach images or PDFs.</p><//>`}
+    <${Modal} title=${edit?'Edit Record':'New Record'} open=${modal} onClose=${()=>setModal(false)}><div style=${{display:'flex',flexDirection:'column',gap:13}}><${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})} placeholder="Insurance, Medical, Home..."/><${Inp} label="Label" value=${f.label||''} onChange=${v=>setF({...f,label:v})} required=${true}/><${Inp} label="Value" value=${f.value||''} onChange=${v=>setF({...f,value:v})}/><${Inp} label="Note" value=${f.note||''} onChange=${v=>setF({...f,note:v})}/><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div></div><//>
+  </div>`;
+}
+
+// ── RECEIPTS & COUPONS ────────────────────────────────────────────────────────
+function ReceiptsCoupons({data,updateData,user}) {
+  const [modal,setModal] = useState(false);
+  const [edit,setEdit] = useState(null);
+  const [query,setQuery] = useState('');
+  const [filter,setFilter] = useState('all');
+  const [f,setF] = useState({});
+  const open = item => { setEdit(item||null); setF(item?{...item}:{type:'receipt',title:'',merchant:'',purchaseDate:today(),amount:'',category:'',tags:'',returnDate:'',expirationDate:'',notes:'',attachments:[]}); setModal(true); };
+  const save = () => { if(!f.title.trim())return; const item={...f,id:edit?.id||uid(),attachments:f.attachments||[],updatedAt:new Date().toISOString(),createdAt:edit?.createdAt||new Date().toISOString()}; updateData({receiptsCoupons:edit?data.receiptsCoupons.map(x=>x.id===edit.id?item:x):[...data.receiptsCoupons,item]}); setModal(false); };
+  const del = async item => { if(!confirm('Delete this item and its files?'))return; await Promise.all((item.attachments||[]).map(a=>storage.ref(a.path).delete().catch(()=>{}))); updateData({receiptsCoupons:data.receiptsCoupons.filter(x=>x.id!==item.id)}); };
+  const updateAttachments=(id,attachments)=>updateData({receiptsCoupons:data.receiptsCoupons.map(x=>x.id===id?{...x,attachments}:x)});
+  const q=query.trim().toLowerCase();
+  const list=[...data.receiptsCoupons].filter(x=>filter==='all'||x.type===filter).filter(x=>!q||[x.title,x.merchant,x.category,x.tags,x.notes].join(' ').toLowerCase().includes(q)).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}><h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Receipts & Coupons</h2><${Btn} small onClick=${()=>open(null)}>+ Add<//></div>
+    <div style=${{display:'grid',gridTemplateColumns:'minmax(0,1fr) auto',gap:8,marginBottom:12}}><${Inp} value=${query} onChange=${setQuery} placeholder="Search merchant, title, tags..."/><${Sel} value=${filter} onChange=${setFilter} options=${[{value:'all',label:'All'},{value:'receipt',label:'Receipts'},{value:'coupon',label:'Coupons'}]}/></div>
+    <div style=${{display:'flex',flexDirection:'column',gap:10}}>${list.map(item=>{const returnDays=daysUntil(item.returnDate);const expDays=daysUntil(item.expirationDate);return html`<${Card} key=${item.id}>
+      <div style=${{display:'flex',gap:10,alignItems:'flex-start'}}><div style=${{fontSize:24}}>${item.type==='coupon'?'🎟️':'🧾'}</div><div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:C.text}}>${item.title}</div><div style=${{fontSize:13,color:C.textMuted}}>${item.merchant||'No merchant'}${item.purchaseDate?' · '+fmt(item.purchaseDate):''}${item.amount!==''&&item.amount!=null?` · $${item.amount}`:''}</div><div style=${{display:'flex',gap:6,flexWrap:'wrap',marginTop:7}}>${item.category&&html`<${Badge} color="blue" small>${item.category}<//>`}${item.returnDate&&html`<${Badge} color=${returnDays<0?'red':returnDays<=7?'amber':'sage'} small>${returnDays<0?'Return date passed':`Return ${fmt(item.returnDate)}`}<//>`}${item.expirationDate&&html`<${Badge} color=${expDays<0?'red':expDays<=7?'amber':'purple'} small>${expDays<0?'Expired':`Expires ${fmt(item.expirationDate)}`}<//>`}</div>${item.notes&&html`<div style=${{fontSize:12,color:C.textMuted,marginTop:6}}>${item.notes}</div>`}</div><div style=${{display:'flex',gap:4}}><${Btn} variant="ghost" small onClick=${()=>open(item)}>✎<//><${Btn} variant="ghost" small onClick=${()=>del(item)}>✕<//></div></div>
+      <${AttachmentManager} user=${user} area="receipts-coupons" parentId=${item.id} attachments=${item.attachments||[]} onChange=${a=>updateAttachments(item.id,a)}/>
+    <//>`;})}${list.length===0&&html`<${Card}><p style=${{textAlign:'center',color:C.textMuted}}>No matching receipts or coupons.</p><//>`}</div>
+    <${Modal} title=${edit?'Edit Item':'New Receipt or Coupon'} open=${modal} onClose=${()=>setModal(false)}><div style=${{display:'flex',flexDirection:'column',gap:13}}><${Sel} label="Type" value=${f.type||'receipt'} onChange=${v=>setF({...f,type:v})} options=${[{value:'receipt',label:'Receipt'},{value:'coupon',label:'Coupon'}]}/><${Inp} label="Title" value=${f.title||''} onChange=${v=>setF({...f,title:v})} required=${true}/><${Inp} label="Merchant / Issuer" value=${f.merchant||''} onChange=${v=>setF({...f,merchant:v})}/><div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Purchase Date" type="date" value=${f.purchaseDate||''} onChange=${v=>setF({...f,purchaseDate:v})}/><${Inp} label="Amount" type="number" value=${f.amount||''} onChange=${v=>setF({...f,amount:v})}/></div><div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Return Date" type="date" value=${f.returnDate||''} onChange=${v=>setF({...f,returnDate:v})}/><${Inp} label="Coupon Expiration" type="date" value=${f.expirationDate||''} onChange=${v=>setF({...f,expirationDate:v})}/></div><${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})}/><${Inp} label="Tags" value=${f.tags||''} onChange=${v=>setF({...f,tags:v})}/><${Txa} label="Notes" value=${f.notes||''} onChange=${v=>setF({...f,notes:v})} rows=${3}/><div style=${{background:C.blueLt,color:C.blue,borderRadius:8,padding:'9px 11px',fontSize:12}}>Save the item first, then use Camera or Image/PDF on its card to attach files.</div><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div></div><//>
+  </div>`;
+}
+
+// ── TRIPS ─────────────────────────────────────────────────────────────────────
+function Trips({data,updateData}) {
+  const [modal,setModal] = useState(false);
+  const [active,setActive] = useState(null);
+  const [eTrip,setETrip] = useState(null);
+  const [f,setF] = useState({});
+  const [packModal,setPackModal] = useState(false);
+  const [pF,setPF] = useState({});
+  const openTrip = p => { setETrip(p||null); setF(p?{...p}:{destination:'',startDate:'',endDate:'',status:'planning',notes:''}); setModal(true); };
+  const saveTrip = () => { if(!f.destination) return; updateData({trips:eTrip?data.trips.map(t=>t.id===eTrip.id?{...f,id:eTrip.id,packingList:eTrip.packingList||[]}:t):[...data.trips,{...f,id:uid(),packingList:[]}]}); setModal(false); };
+  const at = active ? data.trips.find(t=>t.id===active) : null;
+  const deleteTrip = id => { if(confirm('Delete this trip?')){updateData({trips:data.trips.filter(t=>t.id!==id)});setActive(null);} };
+  const savePack = id => { if(!pF.item) return; updateData({trips:data.trips.map(t=>t.id===id?{...t,packingList:[...t.packingList,{...pF,id:uid()}]}:t)}); setPackModal(false); };
+  const toggleP = (tid,pid) => updateData({trips:data.trips.map(t=>t.id===tid?{...t,packingList:t.packingList.map(p=>p.id===pid?{...p,packed:!p.packed}:p)}:t)});
+  const sc={planning:'amber',confirmed:'blue',completed:'sage',cancelled:'red'};
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Trips</h2>
+      <${Btn} small onClick=${()=>openTrip(null)}>+ New Trip<//>
+    </div>
+    ${!at&&html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      ${data.trips.map(t=>html`<${Card} key=${t.id} onClick=${()=>setActive(t.id)} style=${{cursor:'pointer',padding:'14px 16px'}}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+          <div style=${{fontWeight:700,fontSize:17,color:C.text}}>${t.destination}</div>
+          <${Badge} color=${sc[t.status]||'sage'}>${t.status}<//>
+        </div>
+        <div style=${{fontSize:13,color:C.textMuted,marginBottom:6}}>📅 ${fmt(t.startDate)} – ${fmt(t.endDate)}</div>
+        ${t.notes&&html`<div style=${{fontSize:13,color:C.textMuted,marginBottom:6}}>${t.notes}</div>`}
+        <div style=${{fontSize:13,color:C.sage,fontWeight:600}}>🧳 ${t.packingList?.filter(p=>p.packed).length||0}/${t.packingList?.length||0} packed</div>
+      <//>` )}
+    </div>`}
+    ${at&&html`<div>
+      <${Btn} variant="ghost" onClick=${()=>setActive(null)}>← Back<//>
+      <div style=${{marginTop:14}}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+          <div>
+            <h3 style=${{margin:'0 0 3px',fontSize:20,fontWeight:700,color:C.text}}>${at.destination}</h3>
+            <div style=${{fontSize:13,color:C.textMuted}}>${fmt(at.startDate)} – ${fmt(at.endDate)}</div>
+          </div>
+          <div style=${{display:'flex',gap:6}}><${Btn} variant="outline" small onClick=${()=>openTrip(at)}>Edit<//><${Btn} danger small onClick=${()=>deleteTrip(at.id)}>Delete<//><${Btn} small onClick=${()=>{setPF({item:'',category:'Clothing',packed:false});setPackModal(true);}}>+ Item<//></div>
+        </div>
+        ${at.notes&&html`<div style=${{background:C.amberLt,borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>${at.notes}</div>`}
+        ${[...new Set(at.packingList.map(p=>p.category))].map(cat=>html`<div key=${cat} style=${{marginBottom:14}}>
+          <div style=${{fontWeight:700,fontSize:12,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.8,marginBottom:7}}>${cat}</div>
+          ${at.packingList.filter(p=>p.category===cat).map(p=>html`<div key=${p.id} style=${{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+            <div onClick=${()=>toggleP(at.id,p.id)} style=${{width:20,height:20,borderRadius:6,border:`2px solid ${p.packed?C.sage:C.borderMd}`,background:p.packed?C.sage:'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+              ${p.packed&&html`<span style=${{color:'#fff',fontSize:11}}>✓</span>`}
+            </div>
+            <span style=${{flex:1,fontSize:14,color:p.packed?C.textMuted:C.text,textDecoration:p.packed?'line-through':'none'}}>${p.item}</span>
+            <${Btn} variant="ghost" small onClick=${()=>updateData({trips:data.trips.map(t=>t.id===at.id?{...t,packingList:t.packingList.filter(x=>x.id!==p.id)}:t)})}>✕<//>
+          </div>`)}
+        </div>`)}
+      </div>
+      <${Modal} title="Packing Item" open=${packModal} onClose=${()=>setPackModal(false)}>
+        <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Item" value=${pF.item||''} onChange=${v=>setPF({...pF,item:v})} required=${true}/>
+          <${Inp} label="Category" value=${pF.category||''} onChange=${v=>setPF({...pF,category:v})} placeholder="Clothing, Baby, Toiletries..."/>
+          <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setPackModal(false)}>Cancel<//>  <${Btn} onClick=${()=>savePack(at.id)}>Save<//>  </div>
+        </div>
+      <//>
+    </div>`}
+    <${Modal} title=${eTrip?'Edit Trip':'New Trip'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Destination" value=${f.destination||''} onChange=${v=>setF({...f,destination:v})} required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Start Date" type="date" value=${f.startDate||''} onChange=${v=>setF({...f,startDate:v})}/>
+          <${Inp} label="End Date" type="date" value=${f.endDate||''} onChange=${v=>setF({...f,endDate:v})}/>
+        </div>
+        <${Sel} label="Status" value=${f.status||'planning'} onChange=${v=>setF({...f,status:v})} options=${['planning','confirmed','completed','cancelled']}/>
+        <${Txa} label="Notes" value=${f.notes||''} onChange=${v=>setF({...f,notes:v})} rows=${3}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>  <${Btn} onClick=${saveTrip}>Save<//>  </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── PARTIES ───────────────────────────────────────────────────────────────────
+function Parties({data,updateData}) {
+  const [modal,setModal] = useState(false);
+  const [active,setActive] = useState(null);
+  const [eP,setEP] = useState(null);
+  const [f,setF] = useState({});
+  const [checkModal,setCheckModal] = useState(false);
+  const [cF,setCF] = useState({});
+  const openP = p => { setEP(p||null); setF(p?{...p}:{name:'',date:'',venue:'',guestCount:'',theme:'',budget:'',notes:''}); setModal(true); };
+  const saveP = () => { if(!f.name) return; updateData({parties:eP?data.parties.map(p=>p.id===eP.id?{...f,id:eP.id,checklist:eP.checklist||[]}:p):[...data.parties,{...f,id:uid(),checklist:[]}]}); setModal(false); };
+  const at = active ? data.parties.find(p=>p.id===active) : null;
+  const deleteParty = id => { if(confirm('Delete this party?')){updateData({parties:data.parties.filter(p=>p.id!==id)});setActive(null);} };
+  const saveC = pid => { if(!cF.item) return; updateData({parties:data.parties.map(p=>p.id===pid?{...p,checklist:[...p.checklist,{...cF,id:uid()}]}:p)}); setCheckModal(false); };
+  const toggleC = (pid,cid) => updateData({parties:data.parties.map(p=>p.id===pid?{...p,checklist:p.checklist.map(c=>c.id===cid?{...c,done:!c.done}:c)}:p)});
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Parties</h2>
+      <${Btn} small onClick=${()=>openP(null)}>+ New Party<//>
+    </div>
+    ${!at&&html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      ${data.parties.map(p=>html`<${Card} key=${p.id} onClick=${()=>setActive(p.id)} style=${{cursor:'pointer',padding:'14px 16px'}}>
+        <div style=${{fontWeight:700,fontSize:17,color:C.text,marginBottom:5}}>${p.name}</div>
+        <div style=${{fontSize:13,color:C.textMuted,marginBottom:6}}>📅 ${fmt(p.date)} · 📍 ${p.venue}</div>
+        <div style=${{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+          ${p.theme&&html`<${Badge} color="purple" small>${p.theme}<//>` }
+          ${p.guestCount&&html`<${Badge} color="blue" small>👥 ${p.guestCount}<//>` }
+          ${p.budget&&html`<${Badge} color="amber" small>💰 $${p.budget}<//>` }
+        </div>
+        <div style=${{background:C.sageLt,borderRadius:7,padding:'6px 10px',fontSize:13,color:C.sage,fontWeight:600,display:'inline-block'}}>${p.checklist.filter(c=>c.done).length}/${p.checklist.length} tasks done</div>
+      <//>` )}
+    </div>`}
+    ${at&&html`<div>
+      <${Btn} variant="ghost" onClick=${()=>setActive(null)}>← Back<//>
+      <div style=${{marginTop:14}}>
+        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+          <div>
+            <h3 style=${{margin:'0 0 3px',fontSize:20,fontWeight:700,color:C.text}}>${at.name}</h3>
+            <div style=${{fontSize:13,color:C.textMuted}}>${fmt(at.date)} · ${at.venue} · ${at.guestCount} guests</div>
+          </div>
+          <div style=${{display:'flex',gap:6}}><${Btn} variant="outline" small onClick=${()=>openP(at)}>Edit<//><${Btn} danger small onClick=${()=>deleteParty(at.id)}>Delete<//><${Btn} small onClick=${()=>{setCF({item:'',dueDate:'',done:false});setCheckModal(true);}}>+ Task<//></div>
+        </div>
+        <${Card}>
+          <div style=${{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>Planning Checklist</div>
+          ${at.checklist.map(c=>html`<div key=${c.id} style=${{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:`1px solid ${C.border}`}}>
+            <div onClick=${()=>toggleC(at.id,c.id)} style=${{width:20,height:20,borderRadius:6,border:`2px solid ${c.done?C.sage:C.borderMd}`,background:c.done?C.sage:'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+              ${c.done&&html`<span style=${{color:'#fff',fontSize:11}}>✓</span>`}
+            </div>
+            <span style=${{flex:1,fontSize:14,color:c.done?C.textMuted:C.text,textDecoration:c.done?'line-through':'none'}}>${c.item}</span>
+            ${c.dueDate&&html`<span style=${{fontSize:12,color:C.textMuted}}>by ${fmt(c.dueDate)}</span>`}
+            <${Btn} variant="ghost" small onClick=${()=>updateData({parties:data.parties.map(p=>p.id===at.id?{...p,checklist:p.checklist.filter(x=>x.id!==c.id)}:p)})}>✕<//>
+          </div>`)}
+          ${at.checklist.length===0&&html`<p style=${{color:C.textMuted,textAlign:'center'}}>Add tasks!</p>`}
+        <//>
+      </div>
+      <${Modal} title="Checklist Item" open=${checkModal} onClose=${()=>setCheckModal(false)}>
+        <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+          <${Inp} label="Task" value=${cF.item||''} onChange=${v=>setCF({...cF,item:v})} required=${true}/>
+          <${Inp} label="Due by" type="date" value=${cF.dueDate||''} onChange=${v=>setCF({...cF,dueDate:v})}/>
+          <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setCheckModal(false)}>Cancel<//>  <${Btn} onClick=${()=>saveC(at.id)}>Save<//>  </div>
+        </div>
+      <//>
+    </div>`}
+    <${Modal} title=${eP?'Edit Party':'New Party'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Party / Event Name" value=${f.name||''} onChange=${v=>setF({...f,name:v})} required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <${Inp} label="Date" type="date" value=${f.date||''} onChange=${v=>setF({...f,date:v})}/>
+          <${Inp} label="Venue" value=${f.venue||''} onChange=${v=>setF({...f,venue:v})}/>
+        </div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10}}>
+          <${Inp} label="Guests" type="number" value=${f.guestCount||''} onChange=${v=>setF({...f,guestCount:v})}/>
+          <${Inp} label="Budget ($)" type="number" value=${f.budget||''} onChange=${v=>setF({...f,budget:v})}/>
+          <${Inp} label="Theme" value=${f.theme||''} onChange=${v=>setF({...f,theme:v})}/>
+        </div>
+        <${Txa} label="Notes" value=${f.notes||''} onChange=${v=>setF({...f,notes:v})} rows=${3}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>  <${Btn} onClick=${saveP}>Save<//>  </div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── DATA MANAGEMENT (BULK IMPORT/EXPORT) ──────────────────────────────────────
+function DataManagement({data, updateData}) {
+  const [tab, setTab] = useState('import');
+  const [csvData, setCsvData] = useState([]);
+  const [section, setSection] = useState('calendar');
+  const [mapping, setMapping] = useState({});
+  const [preview, setPreview] = useState([]);
+  const [step, setStep] = useState(0);
+  const [status, setStatus] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [importType, setImportType] = useState('csv');
+  
+  const sections = {
+    calendar:{label:'Calendar Events',req:['title','date'],fields:['title','date','type','notes']},
+    kitchen:{label:'Recipes',req:['name'],fields:['name','ingredients','instructions','servings','prepTime','cookTime','category','tags','nutrition','note']},
+    groceries:{label:'Groceries Master',req:['name'],fields:['name','category','tags','note']},
+    tasks:{label:'Tasks',req:['title'],fields:['title','priority','owner','status','dueDate','tags','note']},
+    homecare:{label:'Maintenance',req:['task'],fields:['task','frequency','lastDone','nextDue','notes']},
+  };
+  
+  const handleFileSelect = e => {
+    const f = e.target.files[0];
+    if (f) { setSelectedFile(f); setStatus(''); }
+  };
+  
+  const handleProcessJSON = () => {
+    if (!selectedFile) { setStatus('❌ Select a file first'); return; }
+    
+    setStatus('⏳ Processing JSON...');
+    
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const jsonData = JSON.parse(e.target.result);
+          if (!Array.isArray(jsonData)) { setStatus('❌ JSON must be an array'); return; }
+          if (jsonData.length === 0) { setStatus('❌ JSON is empty'); return; }
+          
+          setCsvData(jsonData);
+          const firstItem = jsonData[0];
+          const fields = Object.keys(firstItem);
+          const m = {};
+          fields.forEach(f => m[f] = f);
+          setMapping(m);
+          
+          const p = jsonData.slice(0, 3).map(row => {
+            const o = {};
+            fields.forEach(f => { o[f] = row[f] || ''; });
+            return o;
+          });
+          setPreview(p);
+          setStep(1);
+          setStatus('');
+        } catch(err) {
+          setStatus(`❌ Invalid JSON: ${err.message}`);
+        }
+      };
+      reader.onerror = () => setStatus('❌ Failed to read file');
+      reader.readAsText(selectedFile);
+    } catch(err) {
+      setStatus(`❌ Error: ${err.message}`);
+    }
+  };
+  
+  const handleProcessCSV = () => {
+    if (!selectedFile) { setStatus('❌ Select a file first'); return; }
+    setStatus('⏳ Processing...');
+    Papa.parse(selectedFile, {
+      header:true,
+      skipEmptyLines:true,
+      transformHeader:h=>String(h||'').trim(),
+      complete:result=>{
+        if(result.errors?.length){setStatus(`❌ ${result.errors[0].message}`);return;}
+        const rows=(result.data||[]).filter(row=>Object.values(row).some(v=>String(v||'').trim()));
+        if(!rows.length){setStatus('❌ No valid rows found');return;}
+        const headers=result.meta.fields||Object.keys(rows[0]);
+        const normalizedFields=sections[section].fields;
+        const m={};
+        headers.forEach(h=>{
+          const clean=h.toLowerCase().replace(/[^a-z0-9]/g,'');
+          m[h]=normalizedFields.find(f=>f.toLowerCase().replace(/[^a-z0-9]/g,'')===clean)||'';
+        });
+        setCsvData(rows); setMapping(m);
+        setPreview(rows.slice(0,3).map(row=>{const o={};Object.keys(m).forEach(k=>{if(m[k])o[m[k]]=row[k];});return o;}));
+        setStep(1); setStatus('');
+      },
+      error:error=>setStatus(`❌ ${error.message||'Could not parse CSV'}`)
+    });
+  };
+  
+  const handleMapping = (csv, app) => {
+    const m = {...mapping}; m[csv] = app; setMapping(m);
+    const p = csvData.slice(0,3).map(row => {
+      const o = {};
+      Object.keys(m).forEach(k => { if(m[k]) o[m[k]] = row[k]; });
+      return o;
+    });
+    setPreview(p);
+  };
+  
+  const handleImport = () => {
+    const cfg = sections[section];
+    const missing = cfg.req.filter(f => !Object.values(mapping).includes(f));
+    if (missing.length > 0) { setStatus(`❌ Missing: ${missing.join(', ')}`); return; }
+    
+    try {
+      const transformed = csvData.map(row => {
+        const item = {id:uid()};
+        Object.keys(mapping).forEach(csv => {
+          const app = mapping[csv];
+          if (app && row[csv] !== undefined && row[csv] !== '') item[app] = row[csv];
+        });
+        if(section==='calendar'){item.type=item.type||'event';item.recurring=String(item.recurring||'').toLowerCase()==='true';}
+        if(section==='kitchen'){item.servings=Number(item.servings)||1;item.nutrition={calories:0,protein:0,carbs:0,fat:0};}
+        if(section==='tasks'){item.priority=item.priority||'medium';item.owner=item.owner||'Me';item.status=item.status||'pending';}
+        if(section==='homecare'){item.frequency=item.frequency||'Monthly';}
+        return item;
+      });
+      
+      let updates = {};
+      if (section === 'calendar') updates.events = [...(data.events||[]),...transformed];
+      else if (section === 'kitchen') updates.recipes = [...(data.recipes||[]),...transformed];
+      else if (section === 'groceries') updates.groceries = {...data.groceries, master:[...(data.groceries?.master||[]),...transformed]};
+      else if (section === 'tasks') updates.tasks = [...(data.tasks||[]),...transformed];
+      else if (section === 'homecare') updates.maintenance = [...(data.maintenance||[]),...transformed];
+      
+      updateData(updates);
+      setStatus(`✅ Imported ${transformed.length} items!`);
+      setTimeout(() => { setCsvData([]); setMapping({}); setPreview([]); setStep(0); setSelectedFile(null); }, 1500);
+    } catch(err) {
+      setStatus(`❌ Import failed: ${err.message}`);
+    }
+  };
+  
+  const handleExport = () => {
+    try {
+      let rows = [], headers = [];
+      if (section === 'calendar') { rows = data.events||[]; headers = ['title','date','type','notes']; }
+      else if (section === 'kitchen') { rows = data.recipes||[]; headers = ['name','ingredients','instructions','servings','prepTime','cookTime','category','tags','note']; }
+      else if (section === 'groceries') { rows = data.groceries?.master||[]; headers = ['name','category','tags','note']; }
+      else if (section === 'tasks') { rows = data.tasks||[]; headers = ['title','priority','owner','status','dueDate','tags','note']; }
+      else if (section === 'homecare') { rows = data.maintenance||[]; headers = ['task','frequency','lastDone','nextDue','notes']; }
+      
+      const csv = [headers.join(','), ...rows.map(r=>headers.map(h=>{return escapeCsv(r[h]);}).join(','))].join('\n');
+      const blob = new Blob([csv],{type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${section}_${today()}.csv`; a.click();
+    } catch(err) {
+      alert(`Export failed: ${err.message}`);
+    }
+  };
+  
+  const cfg = sections[section];
+  return html`<div>
+    <h2 style=${{fontSize:22,fontWeight:700,marginBottom:20,color:C.text,fontFamily:"'DM Serif Display',serif"}}>📊 Data Management</h2>
+    <div style=${{display:'flex',gap:0,marginBottom:20,borderBottom:`2px solid ${C.border}`}}>
+      <button onClick=${()=>{setTab('import');setStep(0);}} style=${{flex:1,padding:'12px 16px',background:tab==='import'?C.sageLt:'transparent',color:tab==='import'?C.sage:C.textMuted,border:'none',cursor:'pointer',fontWeight:700,fontSize:14,borderRadius:'8px 8px 0 0'}}>📥 Import</button>
+      <button onClick=${()=>setTab('export')} style=${{flex:1,padding:'12px 16px',background:tab==='export'?C.sageLt:'transparent',color:tab==='export'?C.sage:C.textMuted,border:'none',cursor:'pointer',fontWeight:700,fontSize:14,borderRadius:'8px 8px 0 0'}}>📤 Export</button>
+    </div>
+    
+    ${tab === 'import' ? html`
+      <div style=${{display:'flex',flexDirection:'column',gap:16}}>
+        <${Sel} label="Select section:" value=${section} onChange=${v=>{setSection(v);setStep(0);}} options=${Object.entries(sections).map(([k,c])=>({value:k,label:c.label}))}/>
+        ${step === 0 ? html`
+          <div style=${{display:'flex',flexDirection:'column',gap:16}}>
+            <div style=${{display:'flex',gap:8}}>
+              <button onClick=${()=>setImportType('csv')} style=${{flex:1,padding:'8px 12px',background:importType==='csv'?C.sage:C.border,color:importType==='csv'?'white':C.text,border:'none',borderRadius:6,cursor:'pointer',fontWeight:600,fontSize:13}}>📄 CSV</button>
+              <button onClick=${()=>setImportType('json')} style=${{flex:1,padding:'8px 12px',background:importType==='json'?C.sage:C.border,color:importType==='json'?'white':C.text,border:'none',borderRadius:6,cursor:'pointer',fontWeight:600,fontSize:13}}>📋 JSON</button>
+            </div>
+            <div style=${{border:`2px dashed ${C.coral}`,borderRadius:12,padding:'40px 20px',textAlign:'center',background:C.coralLt}}>
+              <p style=${{fontSize:14,fontWeight:700,color:C.text,marginBottom:8}}>📁 Upload ${importType === 'csv' ? 'CSV' : 'JSON'} File</p>
+              <p style=${{fontSize:12,color:C.textMuted,marginBottom:16}}>${importType === 'csv' ? 'Export from Google Sheets as .csv' : 'Upload JSON file with array of items'}</p>
+              <input type="file" accept=${importType === 'csv' ? '.csv' : '.json'} onChange=${handleFileSelect} style=${{padding:'8px',marginBottom:'12px'}}/>
+              ${selectedFile && html`
+                <div style=${{marginBottom:16}}>
+                  <p style=${{fontSize:12,color:C.sage,fontWeight:600,marginBottom:8}}>✅ Selected: ${selectedFile.name}</p>
+                  <${Btn} onClick=${importType === 'csv' ? handleProcessCSV : handleProcessJSON}>${importType === 'csv' ? 'Process CSV' : 'Process JSON'}<//>
+                </div>
+              `}
+              ${status && html`<p style=${{fontSize:12,color:status.includes('✅')?C.green:status.includes('⏳')?C.text:C.red,marginTop:8,fontWeight:600}}>${status}</p>`}
+              <p style=${{fontSize:11,color:C.textMuted,marginTop:16}}>Required: ${cfg.req.join(', ')}</p>
+            </div>
+          </div>` : html`
+          <div>
+            <h3 style=${{fontSize:14,fontWeight:700,marginBottom:12,color:C.text}}>Step 1: Map Columns</h3>
+            <div style=${{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:12,marginBottom:20}}>
+              ${Object.keys(csvData[0]||{}).map(k=>html`<div key=${k} style=${{padding:12,border:`1px solid ${C.border}`,borderRadius:8,background:C.cream}}>
+                <label style=${{display:'block',fontSize:11,fontWeight:700,color:C.textMuted,marginBottom:4}}>CSV: "${k}"</label>
+                <select value=${mapping[k]||''} onChange=${e=>handleMapping(k,e.target.value)} style=${{width:'100%',padding:'8px',fontSize:12,border:`1px solid ${C.border}`,borderRadius:6}}>
+                  <option value="">-- Skip --</option>
+                  ${cfg.fields.map(f=>html`<option key=${f} value=${f}>${f}</option>`)}
+                </select>
+              </div>`)}
+            </div>
+            
+            <h3 style=${{fontSize:14,fontWeight:700,marginBottom:12,color:C.text}}>Step 2: Preview</h3>
+            <div style=${{overflowX:'auto',marginBottom:16,border:`1px solid ${C.border}`,borderRadius:8}}>
+              <table style=${{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+                <thead><tr style=${{background:C.sage,color:'white'}}>
+                  ${cfg.fields.map(f=>html`<th key=${f} style=${{padding:'10px',textAlign:'left',borderRight:`1px solid ${C.border}`}}>${f}</th>`)}
+                </tr></thead>
+                <tbody>
+                  ${preview.map((r,i)=>html`<tr key=${i} style=${{background:i%2===0?C.cream:C.card,borderBottom:`1px solid ${C.border}`}}>
+                    ${cfg.fields.map(f=>html`<td key=${f} style=${{padding:'10px',borderRight:`1px solid ${C.border}`,maxWidth:'120px',overflow:'hidden',textOverflow:'ellipsis'}}>${r[f]||'—'}</td>`)}
+                  </tr>`)}
+                </tbody>
+              </table>
+            </div>
+            
+            <p style=${{fontSize:11,color:C.textMuted,marginBottom:16}}>📋 Showing 3 of ${csvData.length} rows</p>
+            ${status && html`<div style=${{padding:12,marginBottom:16,background:status.includes('✅')?C.greenLt:C.redLt,color:status.includes('✅')?C.green:C.red,borderRadius:6,fontSize:12,fontWeight:600}}>${status}</div>`}
+            
+            <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
+              <${Btn} variant="outline" onClick=${()=>{setStep(0);setCsvData([]);setSelectedFile(null);}}>Cancel<//>
+              <${Btn} onClick=${handleImport}>✅ Import ${csvData.length} Items<//>
+            </div>
+          </div>
+        `}
+      </div>
+    ` : html`
+      <div style=${{display:'flex',flexDirection:'column',gap:16}}>
+        <${Sel} label="Select section:" value=${section} onChange=${v=>{setSection(v);}} options=${Object.entries(sections).map(([k,c])=>({value:k,label:c.label}))}/>
+        
+        <h3 style=${{fontSize:14,fontWeight:700,marginBottom:12,color:C.text}}>Export & Clear ${cfg.label}</h3>
+        <p style=${{fontSize:13,color:C.textMuted,marginBottom:16}}>Download as CSV for backup or editing in Google Sheets</p>
+        <div style=${{padding:20,background:C.amberLt,borderRadius:8,marginBottom:16}}>
+          <p style=${{fontWeight:700,marginBottom:8,color:C.text}}>📦 Ready to export</p>
+          <p style=${{fontSize:12,color:C.textMuted,marginBottom:12}}>${section==='calendar'?data.events?.length:section==='kitchen'?data.recipes?.length:section==='groceries'?data.groceries?.master?.length:section==='tasks'?data.tasks?.length:data.maintenance?.length||0} items</p>
+          <${Btn} onClick=${handleExport}>⬇️ Download CSV<//>
+        </div>
+
+        <div style=${{padding:20,background:'#ffebee',borderRadius:8}}>
+          <p style=${{fontWeight:700,marginBottom:8,color:'#c62828'}}>🗑️ Clear All ${cfg.label}</p>
+          <p style=${{fontSize:12,color:'#c62828',marginBottom:12}}>This will delete all ${section} items. Make sure you've exported a backup first!</p>
+          <${Btn} onClick=${()=>{
+            if(confirm(`Delete all ${section}? This cannot be undone!`)) {
+              let updates = {};
+              if(section==='calendar') updates.events = [];
+              else if(section==='kitchen') updates.recipes = [];
+              else if(section==='groceries') updates.groceries = {...data.groceries, master:[]};
+              else if(section==='tasks') updates.tasks = [];
+              else if(section==='homecare') updates.maintenance = [];
+              updateData(updates);
+              setStatus(`✅ Cleared all ${section}!`);
+              setTimeout(()=>setStatus(''),2000);
+            }
+          }}>🗑️ Delete All ${cfg.label}<//>
+        </div>
+      </div>
+    `}
+  </div>`;
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+const NAV = [
+  {id:'dashboard',label:'Home',emoji:'🏠'},
+  {id:'tasks',label:'Tasks',emoji:'✅'},
+  {id:'calendar',label:'Calendar',emoji:'📅'},
+  {id:'groceries',label:'Groceries',emoji:'🛒'},
+  {id:'kitchen',label:'Kitchen',emoji:'🍳'},
+  {id:'homecare',label:'Home Care',emoji:'🏡'},
+  {id:'trips',label:'Trips',emoji:'✈️'},
+  {id:'parties',label:'Parties',emoji:'🎉'},
+  {id:'baby',label:'Child',emoji:'👶'},
+  {id:'records',label:'Records',emoji:'📁'},
+  {id:'receipts',label:'Receipts',emoji:'🧾'},
+  {id:'dataManagement',label:'Data',emoji:'📊'},
+];
+
+function App() {
+  const pageFromUrl = new URLSearchParams(location.search).get('page');
+  const [section,setSection] = useState(NAV.some(n=>n.id===pageFromUrl)?pageFromUrl:'dashboard');
+  const [user,setUser] = useState(undefined);
+  const [data,setData] = useState(null);
+  const [syncModal,setSyncModal] = useState(false);
+  const [navOpen,setNavOpen] = useState(false);
+  const [connected,setConnected] = useState(true);
+  const mobile = useMediaQuery('(max-width: 767px)');
+
+  useEffect(()=>{
+    if(!auth){setUser(null);return;}
+    return auth.onAuthStateChanged(setUser);
+  },[]);
+
+  useEffect(()=>{
+    if(!user||!database)return;
+    setData(null);
+    const dataRef=database.ref(`users/${user.uid}/data`);
+    const connectedRef=database.ref('.info/connected');
+    const onConnection=s=>setConnected(!!s.val()); connectedRef.on('value',onConnection);
+    const onValue=snapshot=>{
+      const value=snapshot.val();
+      if(value){setData(normalizeData(value));}
+      else { const initial=normalizeData(EMPTY_DATA); setData(initial); dataRef.set(initial).catch(console.warn); }
+    };
+    const onError=e=>{console.warn(e);alert('Firebase sync failed. Check your database rules.');};
+    dataRef.on('value',onValue,onError);
+    return()=>{dataRef.off('value',onValue);connectedRef.off('value',onConnection);};
+  },[user?.uid]);
+
+  const updateData = useCallback(updates=>{
+    if(!user)return;
+    setData(prev=>{
+      const next=normalizeData({...prev,...updates});
+      const writes={}; Object.keys(updates).forEach(key=>writes[key]=next[key]);
+      database.ref(`users/${user.uid}/data`).update(writes).catch(e=>alert(`Sync failed: ${e.message}`));
+      return next;
+    });
+  },[user?.uid]);
+
+  const navigate=useCallback(id=>{setSection(id);setNavOpen(false);history.replaceState(null,'',id==='dashboard'?'/?page=dashboard':`/?page=${id}`);},[]);
+
+  if(!firebaseConfigured)return html`<${SetupRequired}/>`;
+  if(user===undefined)return html`<div style=${{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:18,color:C.sage}}>Loading ✦</div>`;
+  if(!user)return html`<${AuthScreen}/>`;
+  if(!data)return html`<div style=${{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:18,color:C.sage}}>Syncing your data ✦</div>`;
+
+  const SECTIONS={
+    dashboard:html`<${Dashboard} data=${data} navigate=${navigate}/>`,
+    tasks:html`<${Tasks} data=${data} updateData=${updateData}/>`,
+    calendar:html`<${CalendarSection} data=${data} updateData=${updateData}/>`,
+    groceries:html`<${Groceries} data=${data} updateData=${updateData}/>`,
+    kitchen:html`<${Kitchen} data=${data} updateData=${updateData}/>`,
+    homecare:html`<${HomeCare} data=${data} updateData=${updateData}/>`,
+    trips:html`<${Trips} data=${data} updateData=${updateData}/>`,
+    parties:html`<${Parties} data=${data} updateData=${updateData}/>`,
+    baby:html`<${BabyCorner} data=${data} updateData=${updateData}/>`,
+    records:html`<${Records} data=${data} updateData=${updateData} user=${user}/>`,
+    receipts:html`<${ReceiptsCoupons} data=${data} updateData=${updateData} user=${user}/>`,
+    dataManagement:html`<${DataManagement} data=${data} updateData=${updateData}/>`
+  };
+  const cur=NAV.find(n=>n.id===section);
+  const navPanel=html`<div style=${{display:'flex',position:mobile?'fixed':'relative',left:0,top:0,bottom:0,zIndex:50,width:mobile?280:240,height:'100%',flexDirection:'column',flexShrink:0,background:C.card,borderRight:`1px solid ${C.border}`,boxShadow:mobile?'8px 0 30px rgba(0,0,0,.16)':'none'}}>
+    <div style=${{padding:'18px 16px 14px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:10}}><div style=${{width:34,height:34,borderRadius:10,background:C.sage,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>✦</div><div style=${{minWidth:0,flex:1}}><div style=${{fontWeight:700,fontSize:14,color:C.text,fontFamily:"'DM Serif Display',serif"}}>Family Life OS</div><div style=${{fontSize:10,color:connected?C.green:C.red}}>${connected?'● Synced':'● Offline'} · ${user.email}</div></div>${mobile&&html`<button onClick=${()=>setNavOpen(false)} style=${{border:'none',background:'none',fontSize:20,cursor:'pointer'}}>✕</button>`}</div>
+    <nav style=${{flex:1,padding:10,overflowY:'auto'}}>${NAV.map(n=>html`<button key=${n.id} onClick=${()=>navigate(n.id)} style=${{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',borderRadius:8,border:'none',cursor:'pointer',fontFamily:'inherit',fontWeight:section===n.id?700:500,fontSize:14,marginBottom:2,textAlign:'left',background:section===n.id?C.sageLt:'transparent',color:section===n.id?C.sage:C.textMuted}}><span style=${{fontSize:18}}>${n.emoji}</span>${n.label}</button>`)}</nav>
+    <div style=${{padding:10,borderTop:`1px solid ${C.border}`,display:'flex',flexDirection:'column',gap:7}}><button onClick=${()=>setSyncModal(true)} style=${{padding:'9px 11px',borderRadius:9,border:`1px solid ${C.border}`,background:C.sageLt,color:C.sage,fontWeight:700,cursor:'pointer'}}>⬇ Backup / Import</button><button onClick=${()=>auth.signOut()} style=${{padding:'9px 11px',borderRadius:9,border:`1px solid ${C.border}`,background:C.card,color:C.textMuted,fontWeight:700,cursor:'pointer'}}>Sign out</button></div>
+  </div>`;
+
+  return html`<div style=${{display:'flex',height:'100vh',background:C.cream,overflow:'hidden'}}>
+    ${mobile&&navOpen&&html`<div onClick=${()=>setNavOpen(false)} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:40}}></div>`}
+    ${(!mobile||navOpen)&&navPanel}
+    <div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
+      ${mobile&&html`<div style=${{display:'flex',alignItems:'center',padding:'7px 10px',borderBottom:`1px solid ${C.border}`,background:C.card,minHeight:48}}><button onClick=${()=>setNavOpen(true)} style=${{border:'none',background:'none',fontSize:21,cursor:'pointer',width:42}}>☰</button><span style=${{fontWeight:700,fontSize:14,color:C.text,flex:1,textAlign:'center'}}>${cur?.emoji} ${cur?.label}</span><span style=${{width:42,textAlign:'center',fontSize:12,color:connected?C.green:C.red}}>${connected?'●':'○'}</span></div>`}
+      <div style=${{flex:1,overflow:'auto',padding:mobile?'14px 12px 80px':'20px 18px',maxWidth:900,width:'100%',margin:'0 auto'}}>${SECTIONS[section]}</div>
+      ${mobile&&html`<div style=${{position:'fixed',left:0,right:0,bottom:0,height:64,paddingBottom:'env(safe-area-inset-bottom)',background:C.card,borderTop:`1px solid ${C.border}`,display:'grid',gridTemplateColumns:'repeat(5,1fr)',zIndex:30}}>${NAV.slice(0,4).concat([{id:'more',label:'More',emoji:'☰'}]).map(n=>html`<button key=${n.id} onClick=${()=>n.id==='more'?setNavOpen(true):navigate(n.id)} style=${{border:'none',background:'transparent',fontSize:10,color:section===n.id?C.sage:C.textMuted,fontWeight:700,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer'}}><span style=${{fontSize:19}}>${n.emoji}</span>${n.label}</button>`)}</div>`}
+    </div>
+    <${Modal} title="Backup / Import" open=${syncModal} onClose=${()=>setSyncModal(false)}><${SyncPanel} data=${data} onImport=${d=>updateData(normalizeData(d))} onClose=${()=>setSyncModal(false)}/><//>
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
