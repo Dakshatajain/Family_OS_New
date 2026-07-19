@@ -646,10 +646,28 @@ function Kitchen({data,updateData}) {
   const [view,setView] = useState(null);
   const [f,setF] = useState({name:'',category:'Dinner',servings:4,prepTime:'',cookTime:'',tags:'',ingredients:'',instructions:'',note:'',nutrition:{calories:0,protein:0,carbs:0,fat:0}});
   const [aiLoading,setAiLoading] = useState(false);
+  const [aiError,setAiError] = useState('');
   const [mpWeek,setMpWeek] = useState(()=>{ const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().split('T')[0]; });
   const [mpCell,setMpCell] = useState(null);
   const [mpCustomText,setMpCustomText] = useState('');
-  const openModal = item => { setEdit(item||null); setF(item?{...item}:{name:'',category:'Dinner',servings:4,prepTime:'',cookTime:'',tags:'',ingredients:'',instructions:'',note:'',nutrition:{calories:0,protein:0,carbs:0,fat:0}}); setModal(true); };
+  const recipeNumber = (value, fallback=0) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const nums = String(value ?? '').replace(/â€“|â€”/g,'-').match(/\d+(?:\.\d+)?/g)?.map(Number).filter(Number.isFinite) || [];
+    if (!nums.length) return fallback;
+    return nums.length > 1 && /-|–|—/.test(String(value)) ? (nums[0] + nums[1]) / 2 : nums[0];
+  };
+  const openModal = item => {
+    setEdit(item||null);
+    setAiError('');
+    const base = item ? {...item} : {name:'',category:'Dinner',servings:4,prepTime:'',cookTime:'',tags:'',ingredients:'',instructions:'',note:'',nutrition:{calories:0,protein:0,carbs:0,fat:0}};
+    setF({...base, servings:recipeNumber(base.servings,4), nutrition:{
+      calories:recipeNumber(base.nutrition?.calories,0),
+      protein:recipeNumber(base.nutrition?.protein,0),
+      carbs:recipeNumber(base.nutrition?.carbs,0),
+      fat:recipeNumber(base.nutrition?.fat,0)
+    }});
+    setModal(true);
+  };
   const save = () => { if(!f.name) return; updateData({recipes:edit?data.recipes.map(r=>r.id===edit.id?{...f,id:edit.id}:r):[...data.recipes,{...f,id:uid()}]}); setModal(false); };
   const del = id => { updateData({recipes:data.recipes.filter(r=>r.id!==id)}); setView(null); };
   const download = () => {
@@ -670,37 +688,44 @@ function Kitchen({data,updateData}) {
 //     }
 //   }));
 const calcNutrition = async () => {
-  console.log('AI Calc clicked!');
-  if (!f.ingredients) return;
+  if (!String(f.ingredients || '').trim()) {
+    setAiError('Add ingredients before calculating nutrition.');
+    return;
+  }
   setAiLoading(true);
+  setAiError('');
   try {
+    const token = await getAuthToken();
+    if (!token) throw new Error('Your sign-in session expired. Sign out and sign in again.');
+    const servings = recipeNumber(f.servings, 1);
     const response = await fetch('/api/nutrition', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await getAuthToken()}` },
-      body: JSON.stringify({ 
-        ingredients: f.ingredients, 
-        servings: f.servings || 1 
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        ingredients: String(f.ingredients).trim(),
+        servings: servings > 0 ? servings : 1
       })
     });
-    
-    if (!response.ok) throw new Error('Failed to calculate nutrition');
-    
-    const nutrition = await response.json();
-    console.log('Nutrition data received:', nutrition);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || payload.details || `Nutrition request failed (${response.status}).`);
     setF(prev => ({
       ...prev,
+      servings: servings > 0 ? servings : 1,
       nutrition: {
-        calories: Number(nutrition.calories) || 0,
-        protein: Number(nutrition.protein) || 0,
-        carbs: Number(nutrition.carbs) || 0,
-        fat: Number(nutrition.fat) || 0
+        calories: recipeNumber(payload.calories, 0),
+        protein: recipeNumber(payload.protein, 0),
+        carbs: recipeNumber(payload.carbs, 0),
+        fat: recipeNumber(payload.fat, 0)
       }
     }));
   } catch (error) {
-    console.error("Nutrition calc failed:", error);
+    console.error('Nutrition calc failed:', error);
+    setAiError(error?.message || 'Nutrition calculation failed.');
+  } finally {
+    setAiLoading(false);
   }
-  setAiLoading(false);
 };
+
   const wDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d,i)=>{ const dt=new Date(mpWeek+'T00:00:00'); dt.setDate(dt.getDate()+i); return {day:d,short:d.slice(0,3),date:dt.toISOString().split('T')[0]}; });
   const getMealItems = (day,who,slot) => {
     const v = data.mealPlan?.[mpWeek]?.[day]?.[who]?.[slot];
@@ -839,8 +864,9 @@ const calcNutrition = async () => {
             <${Btn} variant="outline" small onClick=${calcNutrition}>${aiLoading?'⏳...':'✦ AI Calc'}<//>
           </div>
           <div style=${{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
-            ${['calories','protein','carbs','fat'].map(k=>html`<${Inp} key=${k} label=${k[0].toUpperCase()+k.slice(1)} type="number" value=${f.nutrition?.[k]||''} onChange=${v=>setF({...f,nutrition:{...f.nutrition,[k]:+v}})}/>` )}
+            ${['calories','protein','carbs','fat'].map(k=>html`<${Inp} key=${k} label=${k[0].toUpperCase()+k.slice(1)} type="number" value=${Number.isFinite(Number(f.nutrition?.[k]))?f.nutrition?.[k]:''} onChange=${v=>setF({...f,nutrition:{...f.nutrition,[k]:+v}})}/>` )}
           </div>
+          ${aiError&&html`<div style=${{marginTop:8,padding:'9px 11px',borderRadius:8,background:C.redLt,color:C.red,fontSize:12,fontWeight:600}}>${aiError}</div>`}
         </div>
         <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}>
           <${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//>
