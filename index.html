@@ -8,7 +8,6 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="Life OS"/>
 <link rel="manifest" href="manifest.json"/>
-<link rel="icon" href="/icon-192.svg"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <title>Family Life OS</title>
@@ -18,10 +17,7 @@ html,body{height:100%;overflow:hidden;font-family:'Outfit',sans-serif;background
 #root{height:100%;padding-top:max(8px, env(safe-area-inset-top));}
 ::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-thumb{background:#EDE8E2;border-radius:3px;}
-input,select,textarea,button{font-family:'Outfit',sans-serif;border-radius:8px;}
-input:not([type='checkbox']):not([type='radio']),select,textarea,button{-webkit-appearance:none;appearance:none;}
-input[type='checkbox'],input[type='radio']{accent-color:#5F8B6A;}
-.file-input{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden;}
+input,select,textarea,button{font-family:'Outfit',sans-serif;-webkit-appearance:none;appearance:none;border-radius:8px;}
 input:focus,select:focus,textarea:focus{outline:none!important;border-color:#5F8B6A!important;box-shadow:0 0 0 3px rgba(95,139,106,0.15)!important;}
 @media (max-width:768px) {
   body{font-size:16px;}
@@ -35,10 +31,10 @@ input:focus,select:focus,textarea:focus{outline:none!important;border-color:#5F8
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-<script src="/firebase-config.js"></script>
+<script src="firebase-config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
 <script>
 'use strict';
@@ -59,95 +55,110 @@ const C = {
   green:'#3D8B5A',greenLt:'#E8F5EE',
 };
 
-// ── FIREBASE CONFIG ───────────────────────────────────────────────────────
-const firebaseConfig = window.FAMILY_OS_FIREBASE_CONFIG || {};
-const requiredFirebaseKeys = ['apiKey','authDomain','databaseURL','projectId','storageBucket','messagingSenderId','appId'];
-const firebaseConfigured = requiredFirebaseKeys.every(key => {
-  const value = String(firebaseConfig[key] || '');
-  return value && !value.includes('PASTE_') && !value.includes('YOUR_REAL_VALUE');
-});
-
-let auth = null;
+// ── FIREBASE CONFIG ──────────────────────────────────────────────────────────
 let database = null;
-let storage = null;
+let auth = null;
+let fileStorage = null;
+let firebaseSetupError = '';
 try {
-  if (firebaseConfigured) {
-    const app = firebase.initializeApp(firebaseConfig);
-    auth = firebase.auth();
-    database = firebase.database();
-    storage = firebase.storage();
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
-    console.log('Firebase initialized');
-  }
+  const firebaseConfig = window.FAMILY_OS_FIREBASE_CONFIG || {};
+  const missingConfig = !firebaseConfig.apiKey || String(firebaseConfig.apiKey).startsWith('PASTE_');
+  if (missingConfig) throw new Error('Firebase setup is incomplete. Update firebase-config.js with the Web App configuration from your new Firebase project.');
+  const app = firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
+  database = firebase.database(app);
+  auth = firebase.auth(app);
+  fileStorage = firebase.storage(app);
+  auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+  console.log('Firebase initialized');
 } catch (e) {
-  console.warn('Firebase initialization failed:', e.message);
+  firebaseSetupError = e.message || 'Firebase could not be initialized.';
+  console.error(firebaseSetupError);
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-const STORAGE_KEY = 'family-life-os-ui-v1';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const localDateString = d => {
-  const x = d || new Date();
-  const y = x.getFullYear();
-  const m = String(x.getMonth()+1).padStart(2,'0');
-  const day = String(x.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-};
-const today = () => localDateString(new Date());
+const today = () => { const d=new Date(); const off=d.getTimezoneOffset(); return new Date(d.getTime()-off*60000).toISOString().split('T')[0]; };
 const fmt = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
-const daysUntil = d => {
-  if (!d) return Infinity;
-  const now = new Date(); now.setHours(0,0,0,0);
-  return Math.round((new Date(d+'T00:00:00') - now) / 86400000);
-};
-const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const daysUntil = d => Math.ceil((new Date(d+'T00:00:00') - new Date()) / 86400000);
+const uid = () => (crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 const recurringDate = (ev, yr) => {
   if (!ev.recurring) return ev.date;
   const o = new Date(ev.date+'T00:00:00');
   return `${yr}-${String(o.getMonth()+1).padStart(2,'0')}-${String(o.getDate()).padStart(2,'0')}`;
 };
-const nextRecurringDate = ev => {
-  if (!ev?.date) return '';
-  if (!ev.recurring) return ev.date;
-  const now = new Date(); now.setHours(0,0,0,0);
-  let candidate = recurringDate(ev, now.getFullYear());
-  if (new Date(candidate+'T00:00:00') < now) candidate = recurringDate(ev, now.getFullYear()+1);
-  return candidate;
-};
-const escapeCsv = value => {
-  const text = String(value ?? '');
-  return /[\",\n\r]/.test(text) ? `"${text.replace(/"/g,'""')}"` : text;
-};
-const safeFileName = name => String(name||'file').replace(/[^a-zA-Z0-9._-]+/g,'_').slice(0,100);
-const allowedFile = file => file && (file.type.startsWith('image/') || file.type === 'application/pdf');
-const maxUploadBytes = 10 * 1024 * 1024;
-const encodeBackup = value => btoa(unescape(encodeURIComponent(JSON.stringify(value))));
-const decodeBackup = value => JSON.parse(decodeURIComponent(escape(atob(value))));
+const safeFilename = name => String(name||'file').replace(/[^a-zA-Z0-9._-]+/g,'-').slice(0,100);
+const formatBytes = bytes => bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes/1024).toFixed(1)} KB` : `${(bytes/1048576).toFixed(1)} MB`;
+async function getAuthToken() {
+  if (!auth?.currentUser) throw new Error('Please sign in again.');
+  return auth.currentUser.getIdToken();
+}
+async function uploadFiles(files, area, itemId, setProgress=()=>{}) {
+  if (!fileStorage || !auth?.currentUser) throw new Error('File storage is not ready.');
+  const list = Array.from(files||[]);
+  const uploaded = [];
+  for (let i=0;i<list.length;i++) {
+    const file=list[i];
+    if (!(file.type.startsWith('image/') || file.type==='application/pdf')) throw new Error('Only images and PDFs are allowed.');
+    if (file.size > 10*1024*1024) throw new Error('Each file must be smaller than 10 MB.');
+    const attachmentId=uid();
+    const storagePath=`users/${auth.currentUser.uid}/${area}/${itemId}/${attachmentId}-${safeFilename(file.name)}`;
+    const ref=fileStorage.ref(storagePath);
+    await new Promise((resolve,reject)=>{
+      const task=ref.put(file,{contentType:file.type||'application/octet-stream'});
+      task.on('state_changed', snap=>setProgress(Math.round(((i+snap.bytesTransferred/snap.totalBytes)/list.length)*100)), reject, resolve);
+    });
+    uploaded.push({id:attachmentId,storagePath,originalName:file.name,mimeType:file.type,sizeBytes:file.size,createdAt:new Date().toISOString()});
+  }
+  setProgress(100);
+  return uploaded;
+}
+async function previewAttachment(att) {
+  try {
+    const url=await fileStorage.ref(att.storagePath).getDownloadURL();
+    window.open(url,'_blank','noopener,noreferrer');
+  } catch(e) { alert(`Could not open file: ${e.message}`); }
+}
+async function deleteStoredAttachment(att) {
+  if (!att?.storagePath || !fileStorage) return;
+  try { await fileStorage.ref(att.storagePath).delete(); } catch(e) { if (e.code!=='storage/object-not-found') throw e; }
+}
 
-// ── EMPTY DATA ───────────────────────────────────────────────────────────────
-const EMPTY_DATA = {
-  tasks:[],
-  events:[],
-  maintenance:[],
-  cleaning:{daily:[],weekly:[],monthly:[],quarterly:[]},
-  groceries:{master:[],weekly:[],fridge:[]},
-  recipes:[],
-  mealPlan:{},
-  trips:[],
-  parties:[],
-  baby:{name:'',dob:'',lessonPlans:[],solids:[],inventory:[],milestones:[]},
-  records:[],
-  receiptsCoupons:[]
+
+// ── SAFE EMPTY DATA ───────────────────────────────────────────────────────────
+const SEED = {
+  tasks: [],
+  events: [],
+  maintenance: [],
+  cleaning: { daily: [], weekly: [], monthly: [], quarterly: [] },
+  groceries: { master: [], weekly: [], fridge: [] },
+  recipes: [],
+  mealPlan: {},
+  trips: [],
+  parties: [],
+  baby: { name: 'Child', dob: '', lessonPlans: [], solids: [], inventory: [], milestones: [] },
+  records: [],
+  receiptsCoupons: []
 };
-const normalizeData = raw => ({
-  ...EMPTY_DATA,
-  ...(raw||{}),
-  cleaning:{...EMPTY_DATA.cleaning,...(raw?.cleaning||{})},
-  groceries:{...EMPTY_DATA.groceries,...(raw?.groceries||{})},
-  baby:{...EMPTY_DATA.baby,...(raw?.baby||{})},
-  records:Array.isArray(raw?.records)?raw.records:[],
-  receiptsCoupons:Array.isArray(raw?.receiptsCoupons)?raw.receiptsCoupons:[]
-});
+const freshEmptyData = () => JSON.parse(JSON.stringify(SEED));
+const normalizeData = value => {
+  const d = value && typeof value === 'object' ? value : {};
+  return {
+    ...freshEmptyData(),
+    ...d,
+    tasks: Array.isArray(d.tasks) ? d.tasks : [],
+    events: Array.isArray(d.events) ? d.events : [],
+    maintenance: Array.isArray(d.maintenance) ? d.maintenance : [],
+    cleaning: {...SEED.cleaning,...(d.cleaning||{})},
+    groceries: {...SEED.groceries,...(d.groceries||{})},
+    recipes: Array.isArray(d.recipes) ? d.recipes : [],
+    mealPlan: d.mealPlan && typeof d.mealPlan === 'object' ? d.mealPlan : {},
+    trips: Array.isArray(d.trips) ? d.trips : [],
+    parties: Array.isArray(d.parties) ? d.parties : [],
+    baby: {...SEED.baby,...(d.baby||{}),lessonPlans:Array.isArray(d.baby?.lessonPlans)?d.baby.lessonPlans:[],solids:Array.isArray(d.baby?.solids)?d.baby.solids:[],inventory:Array.isArray(d.baby?.inventory)?d.baby.inventory:[],milestones:Array.isArray(d.baby?.milestones)?d.baby.milestones:[]},
+    records: Array.isArray(d.records) ? d.records.map(r=>({...r,attachments:Array.isArray(r.attachments)?r.attachments:[]})) : [],
+    receiptsCoupons: Array.isArray(d.receiptsCoupons) ? d.receiptsCoupons.map(r=>({...r,attachments:Array.isArray(r.attachments)?r.attachments:[]})) : []
+  };
+};
 
 // ── SHARED UI COMPONENTS ──────────────────────────────────────────────────────
 function Badge({children,color='sage',small}) {
@@ -212,126 +223,6 @@ function Modal({title,open,onClose,children}) {
   </div>`;
 }
 
-
-function SetupRequired() {
-  return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:C.cream}}>
-    <${Card} style=${{maxWidth:560,width:'100%',padding:24}}>
-      <div style=${{fontSize:34,marginBottom:10}}>⚙️</div>
-      <h1 style=${{fontFamily:"'DM Serif Display',serif",fontSize:26,color:C.text,marginBottom:8}}>Firebase setup needed</h1>
-      <p style=${{fontSize:14,lineHeight:1.7,color:C.textMuted,marginBottom:14}}>Open <strong>firebase-config.js</strong>, replace the six PASTE_ values with the web configuration from your new Firebase project, then commit the file again.</p>
-      <div style=${{fontSize:13,color:C.textMuted,background:C.sageLt,borderRadius:10,padding:12}}>The included README has exact click-by-click instructions.</div>
-    <//>
-  </div>`;
-}
-
-function AuthScreen() {
-  const [mode,setMode] = useState('signin');
-  const [email,setEmail] = useState('');
-  const [password,setPassword] = useState('');
-  const [error,setError] = useState('');
-  const [message,setMessage] = useState('');
-  const [busy,setBusy] = useState(false);
-  const submit = async () => {
-    setError(''); setMessage(''); setBusy(true);
-    try {
-      if (mode==='register') {
-        await auth.createUserWithEmailAndPassword(email.trim(),password);
-      } else {
-        await auth.signInWithEmailAndPassword(email.trim(),password);
-      }
-    } catch(e) { setError((e.message||'Could not continue').replace('Firebase: ','')); }
-    setBusy(false);
-  };
-  const reset = async () => {
-    setError(''); setMessage('');
-    if(!email.trim()){setError('Enter your email address first.');return;}
-    try { await auth.sendPasswordResetEmail(email.trim()); setMessage('Password reset email sent.'); }
-    catch(e){setError((e.message||'Could not send reset email').replace('Firebase: ',''));}
-  };
-  return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:18,background:`linear-gradient(135deg,${C.sageLt},${C.cream},${C.amberLt})`}}>
-    <${Card} style=${{maxWidth:430,width:'100%',padding:24}}>
-      <div style=${{width:48,height:48,borderRadius:14,background:C.sage,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,marginBottom:14}}>✦</div>
-      <h1 style=${{fontFamily:"'DM Serif Display',serif",fontSize:28,color:C.text,marginBottom:4}}>Family Life OS</h1>
-      <p style=${{fontSize:14,color:C.textMuted,marginBottom:20}}>Use the same email and password on every device for automatic sync.</p>
-      <div style=${{display:'flex',gap:6,marginBottom:16}}>
-        ${[['signin','Sign in'],['register','Create account']].map(([k,l])=>html`<button key=${k} onClick=${()=>setMode(k)} style=${{flex:1,border:`1.5px solid ${mode===k?C.sage:C.border}`,background:mode===k?C.sageLt:C.card,color:mode===k?C.sage:C.textMuted,padding:'9px 10px',fontWeight:700,cursor:'pointer'}}>${l}</button>`)}
-      </div>
-      <div style=${{display:'flex',flexDirection:'column',gap:12}}>
-        <${Inp} label="Email" type="email" value=${email} onChange=${setEmail} required=${true}/>
-        <${Inp} label="Password" type="password" value=${password} onChange=${setPassword} required=${true}/>
-        ${error&&html`<div style=${{background:C.redLt,color:C.red,padding:'10px 12px',borderRadius:8,fontSize:13}}>${error}</div>`}
-        ${message&&html`<div style=${{background:C.greenLt,color:C.green,padding:'10px 12px',borderRadius:8,fontSize:13}}>${message}</div>`}
-        <${Btn} disabled=${busy||!email.trim()||password.length<6} onClick=${submit} style=${{justifyContent:'center',padding:13}}>${busy?'Please wait…':mode==='register'?'Create account':'Sign in'}<//>
-        ${mode==='signin'&&html`<button onClick=${reset} style=${{border:'none',background:'none',color:C.sage,cursor:'pointer',fontWeight:600,fontSize:13}}>Forgot password?</button>`}
-      </div>
-    <//>
-  </div>`;
-}
-
-function useMediaQuery(query) {
-  const [matches,setMatches] = useState(()=>window.matchMedia(query).matches);
-  useEffect(()=>{
-    const media=window.matchMedia(query); const change=()=>setMatches(media.matches);
-    change(); media.addEventListener?.('change',change);
-    return()=>media.removeEventListener?.('change',change);
-  },[query]);
-  return matches;
-}
-
-function AttachmentItem({attachment,onDelete}) {
-  const [url,setUrl] = useState('');
-  const [error,setError] = useState('');
-  useEffect(()=>{
-    let active=true;
-    if(!storage||!attachment?.path)return;
-    storage.ref(attachment.path).getDownloadURL().then(u=>active&&setUrl(u)).catch(()=>active&&setError('Unavailable'));
-    return()=>{active=false;};
-  },[attachment?.path]);
-  const isImage = String(attachment?.type||'').startsWith('image/');
-  return html`<div style=${{display:'flex',alignItems:'center',gap:8,border:`1px solid ${C.border}`,borderRadius:9,padding:8,background:C.cream}}>
-    ${isImage&&url?html`<img src=${url} alt="" style=${{width:46,height:46,objectFit:'cover',borderRadius:7,border:`1px solid ${C.border}`}}/>`:html`<div style=${{width:46,height:46,borderRadius:7,background:C.redLt,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>📄</div>`}
-    <div style=${{flex:1,minWidth:0}}><div style=${{fontSize:12,fontWeight:600,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${attachment.name}</div><div style=${{fontSize:11,color:C.textMuted}}>${Math.ceil((attachment.size||0)/1024)} KB${error?' · '+error:''}</div></div>
-    ${url&&html`<a href=${url} target="_blank" rel="noopener" style=${{fontSize:12,fontWeight:700,color:C.blue,textDecoration:'none'}}>Preview</a>`}
-    ${onDelete&&html`<${Btn} variant="ghost" small onClick=${()=>onDelete(attachment)}>✕<//>`}
-  </div>`;
-}
-
-function AttachmentManager({user,area,parentId,attachments,onChange}) {
-  const [progress,setProgress] = useState('');
-  const [error,setError] = useState('');
-  const uploadOne = file => new Promise((resolve,reject)=>{
-    if(!allowedFile(file)) return reject(new Error('Only images and PDFs are allowed.'));
-    if(file.size>maxUploadBytes) return reject(new Error('Each file must be 10 MB or smaller.'));
-    const attachmentId=uid();
-    const path=`users/${user.uid}/${area}/${parentId}/${attachmentId}/${safeFileName(file.name)}`;
-    const task=storage.ref(path).put(file,{contentType:file.type});
-    task.on('state_changed',snap=>setProgress(`${Math.round(snap.bytesTransferred/snap.totalBytes*100)}%`),reject,()=>resolve({id:attachmentId,path,name:file.name,type:file.type,size:file.size,createdAt:new Date().toISOString()}));
-  });
-  const pick = async event => {
-    const files=[...(event.target.files||[])]; event.target.value='';
-    if(!files.length)return; setError('');
-    try {
-      let next=[...(attachments||[])];
-      for(const file of files){ const a=await uploadOne(file); next=[...next,a]; onChange(next); }
-    } catch(e){setError(e.message||'Upload failed.');}
-    setProgress('');
-  };
-  const remove = async attachment => {
-    setError('');
-    try { await storage.ref(attachment.path).delete(); } catch(e) { if(e.code!=='storage/object-not-found')setError('File could not be deleted from Storage.'); }
-    onChange((attachments||[]).filter(a=>a.id!==attachment.id));
-  };
-  return html`<div style=${{marginTop:10}}>
-    ${(attachments||[]).length>0&&html`<div style=${{display:'flex',flexDirection:'column',gap:7,marginBottom:8}}>${attachments.map(a=>html`<${AttachmentItem} key=${a.id} attachment=${a} onDelete=${remove}/>`)} </div>`}
-    <div style=${{display:'flex',gap:7,flexWrap:'wrap'}}>
-      <label style=${{display:'inline-flex',alignItems:'center',gap:5,border:`1.5px solid ${C.borderMd}`,borderRadius:8,padding:'7px 11px',fontSize:12,fontWeight:700,color:C.text,cursor:'pointer',background:C.card}}>📷 Camera<input className="file-input" type="file" accept="image/*" capture="environment" onChange=${pick}/></label>
-      <label style=${{display:'inline-flex',alignItems:'center',gap:5,border:`1.5px solid ${C.borderMd}`,borderRadius:8,padding:'7px 11px',fontSize:12,fontWeight:700,color:C.text,cursor:'pointer',background:C.card}}>📎 Image/PDF<input className="file-input" type="file" multiple accept="image/*,application/pdf" onChange=${pick}/></label>
-      ${progress&&html`<span style=${{fontSize:12,color:C.sage,fontWeight:700,alignSelf:'center'}}>Uploading ${progress}</span>`}
-    </div>
-    ${error&&html`<div style=${{fontSize:12,color:C.red,marginTop:6}}>${error}</div>`}
-  </div>`;
-}
-
 // ── SYNC ──────────────────────────────────────────────────────────────────────
 function SyncPanel({data,onImport,onClose}) {
   const [mode,setMode] = useState('choose');
@@ -345,7 +236,7 @@ function SyncPanel({data,onImport,onClose}) {
     setStatus('✓ Downloaded! Send via WhatsApp or iMessage.');
   };
   const copyCode = async () => {
-    try { await navigator.clipboard.writeText(encodeBackup(data)); setStatus('✓ Copied! Paste in a message.'); }
+    try { await navigator.clipboard.writeText(btoa(JSON.stringify(data))); setStatus('✓ Copied! Paste in a message.'); }
     catch { setStatus('Use Download option instead.'); }
   };
   const importFile = e => {
@@ -358,17 +249,17 @@ function SyncPanel({data,onImport,onClose}) {
     r.readAsText(file);
   };
   const importCode = () => {
-    try { const d=decodeBackup(code.trim()); if(d.tasks&&d.events){onImport(d);setTimeout(onClose,800);} else setStatus('Invalid data.'); }
+    try { const d=JSON.parse(atob(code.trim())); if(d.tasks&&d.events){onImport(d);setTimeout(onClose,800);} else setStatus('Invalid data.'); }
     catch { setStatus('Could not read — paste the full code.'); }
   };
 
   return html`<div style=${{display:'flex',flexDirection:'column',gap:12}}>
     ${mode==='choose' && html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
       <div style=${{background:C.blueLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.blue,lineHeight:1.6}}>
-        <strong>Backup & migration:</strong> Automatic sync is already active. Use this only for backups or moving old data into the new app.
+        <strong>Family Sync:</strong> One person exports, the other imports. Takes 10 seconds!
       </div>
-      <${Btn} onClick=${()=>setMode('export')} style=${{justifyContent:'center',padding:'14px'}}>📤 Export backup<//>
-      <${Btn} variant="outline" onClick=${()=>setMode('import')} style=${{justifyContent:'center',padding:'14px'}}>📥 Import backup<//>
+      <${Btn} onClick=${()=>setMode('export')} style=${{justifyContent:'center',padding:'14px'}}>📤 Share my data<//>
+      <${Btn} variant="outline" onClick=${()=>setMode('import')} style=${{justifyContent:'center',padding:'14px'}}>📥 Import from family<//>
     </div>`}
     ${mode==='export' && html`<div style=${{display:'flex',flexDirection:'column',gap:10}}>
       <${Btn} variant="ghost" small onClick=${()=>setMode('choose')}>← Back<//>
@@ -403,8 +294,8 @@ function Dashboard({data,navigate}) {
   const yr = new Date().getFullYear();
   const activeTasks = data.tasks.filter(t=>t.status!=='done');
   const upcoming = [...data.events]
-    .map(e=>({...e,_next:nextRecurringDate(e)})).filter(e=>{ const du=daysUntil(e._next); return du>=0&&du<=30; })
-    .sort((a,b)=>daysUntil(a._next)-daysUntil(b._next)).slice(0,4);
+    .filter(e=>{ const du=daysUntil(recurringDate(e,yr)); return du>=0&&du<=30; })
+    .sort((a,b)=>daysUntil(recurringDate(a,yr))-daysUntil(recurringDate(b,yr))).slice(0,4);
   const overdue = data.maintenance.filter(m=>daysUntil(m.nextDue)<=0);
   const babyAge = data.baby.dob ? Math.max(0,Math.floor((new Date()-new Date(data.baby.dob+'T00:00:00'))/(1000*60*60*24*30.44))) : null;
   const eCol = {birthday:'coral',anniversary:'purple',appointment:'blue',event:'sage'};
@@ -419,7 +310,7 @@ function Dashboard({data,navigate}) {
         {label:'Open Tasks',val:activeTasks.length,c:C.coral,bg:C.coralLt,icon:'✅',nav:'tasks'},
         {label:'Events (30d)',val:upcoming.length,c:C.purple,bg:C.purpleLt,icon:'📅',nav:'calendar'},
         {label:'Overdue Maint.',val:overdue.length,c:C.amber,bg:C.amberLt,icon:'🏡',nav:'homecare'},
-        {label:data.baby.name&&babyAge!==null?`${data.baby.name} ${babyAge}mo`:'Child profile',val:data.baby.lessonPlans.length+' plans',c:C.sage,bg:C.sageLt,icon:'👶',nav:'baby'},
+        {label:`${data.baby.name||'Child'}${babyAge===null?'':` ${babyAge}mo`}`,val:data.baby.lessonPlans.length+' plans',c:C.sage,bg:C.sageLt,icon:'👶',nav:'baby'},
       ].map(s=>html`<div key=${s.nav} onClick=${()=>navigate(s.nav)} style=${{background:s.bg,borderRadius:12,padding:'14px 16px',cursor:'pointer',border:`1px solid ${s.c}22`}}>
         <div style=${{fontSize:20,marginBottom:6}}>${s.icon}</div>
         <div style=${{fontSize:22,fontWeight:700,color:s.c}}>${s.val}</div>
@@ -447,7 +338,7 @@ function Dashboard({data,navigate}) {
           <${Btn} variant="ghost" small onClick=${()=>navigate('calendar')}>Calendar →<//>
         </div>
         ${upcoming.map(e=>{
-          const d=e._next||nextRecurringDate(e), du=daysUntil(d);
+          const d=recurringDate(e,yr), du=daysUntil(d);
           const dt=new Date(d+'T00:00:00');
           return html`<div key=${e.id} style=${{display:'flex',gap:12,alignItems:'center',paddingBottom:9,marginBottom:9,borderBottom:`1px solid ${C.border}`}}>
             <div style=${{background:C.sageLt,borderRadius:8,padding:'4px 8px',textAlign:'center',minWidth:44,flexShrink:0}}>
@@ -465,10 +356,10 @@ function Dashboard({data,navigate}) {
       <//>
       <${Card} style=${{background:`linear-gradient(135deg,${C.sageLt},${C.amberLt})`}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>👶 ${data.baby.name?data.baby.name+"'s":'Child'} Corner</span>
+          <span style=${{fontWeight:700,fontSize:14,color:C.text}}>👶 ${data.baby.name}'s Corner</span>
           <${Btn} variant="ghost" small onClick=${()=>navigate('baby')}>View →<//>
         </div>
-        <div style=${{fontSize:13,color:C.textMuted,marginBottom:10}}>${babyAge===null?'Add a birth date':babyAge+' months old'} · ${data.baby.milestones.length} milestones</div>
+        <div style=${{fontSize:13,color:C.textMuted,marginBottom:10}}>${babyAge===null?'Add a birth date':`${babyAge} months old`} · ${data.baby.milestones.length} milestones</div>
         ${data.baby.lessonPlans[0]&&html`<div style=${{background:C.card,borderRadius:10,padding:'10px 12px'}}>
           <div style=${{fontSize:11,fontWeight:700,color:C.sage,marginBottom:4}}>WEEK ${data.baby.lessonPlans[0].weekNum} · ${data.baby.lessonPlans[0].theme}</div>
           <div style=${{display:'flex',gap:6,flexWrap:'wrap'}}>
@@ -548,7 +439,7 @@ function Tasks({data,updateData}) {
         <${Inp} label="Title" value=${f.title} onChange=${v=>setF({...f,title:v})} required=${true}/>
         <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <${Sel} label="Priority" value=${f.priority} onChange=${v=>setF({...f,priority:v})} options=${['high','medium','low']}/>
-          <${Sel} label="Owner" value=${f.owner} onChange=${v=>setF({...f,owner:v})} options=${['Me','Partner','Family']}/>
+          <${Sel} label="Owner" value=${f.owner} onChange=${v=>setF({...f,owner:v})} options=${['Me','Partner','Child','All']}/>
         </div>
         <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <${Sel} label="Status" value=${f.status} onChange=${v=>setF({...f,status:v})} options=${['pending','in-progress','done','blocked']}/>
@@ -586,7 +477,7 @@ function CalendarSection({data,updateData}) {
     const ds = `${view.year}-${String(view.month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     return data.events.filter(e=>recurringDate(e,view.year)===ds);
   };
-  const upcoming = [...data.events].map(e=>({...e,rd:nextRecurringDate(e)}))
+  const upcoming = [...data.events].map(e=>({...e,rd:recurringDate(e,view.year)}))
     .filter(e=>daysUntil(e.rd)>=0).sort((a,b)=>daysUntil(a.rd)-daysUntil(b.rd)).slice(0,6);
   return html`<div>
     <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
@@ -785,7 +676,7 @@ const calcNutrition = async () => {
   try {
     const response = await fetch('/api/nutrition', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await auth.currentUser.getIdToken()}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await getAuthToken()}` },
       body: JSON.stringify({ 
         ingredients: f.ingredients, 
         servings: f.servings || 1 
@@ -1055,34 +946,37 @@ function BabyCorner({data,updateData}) {
   const [invModal,setInvModal] = useState(false);
   const [iEdit,setIEdit] = useState(null);
   const [iF,setIF] = useState({});
-  const [profileModal,setProfileModal] = useState(false);
-  const [profileF,setProfileF] = useState({name:data.baby.name||'',dob:data.baby.dob||''});
   const [mileModal,setMileModal] = useState(false);
   const [mEdit,setMEdit] = useState(null);
   const [mF,setMF] = useState({});
-  const babyAge = data.baby.dob ? Math.max(0,Math.floor((new Date()-new Date(data.baby.dob+'T00:00:00'))/(1000*60*60*24*30.44))) : null;
+  const babyAge = data.baby.dob ? Math.max(1,Math.floor((new Date()-new Date(data.baby.dob+'T00:00:00'))/(1000*60*60*24*30.44))) : 18;
   const vp = viewPlan ? data.baby.lessonPlans.find(p=>p.id===viewPlan) : null;
   const genPlan = async () => {
-    if (!genF.theme) return; setAiLoading(true); setAiDone(false);
+    if (!genF.theme) return;
+    setAiLoading(true); setAiDone(false);
     try {
-      const token = await auth.currentUser.getIdToken();
-      const res = await fetch('/api/lesson-plan',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(genF)});
-      const d = await res.json(); if(!res.ok) throw new Error(d.error||'Generation failed');
-      const activities=(d.activities||[]).map(a=>({...a,id:uid()}));
+      const res = await fetch('/api/lesson-plan',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${await getAuthToken()}`},
+        body:JSON.stringify(genF)
+      });
+      const payload=await res.json();
+      if(!res.ok) throw new Error(payload.error||'Could not generate activities.');
+      const activities=(payload.activities||[]).map(a=>({...a,id:uid()}));
       const plan={id:uid(),weekNum:+genF.weekNum||data.baby.lessonPlans.length+1,theme:genF.theme,color:genF.color,animal:genF.animal,letter:genF.letter,bodyPart:genF.bodyPart,shape:genF.shape,number:genF.number,activities};
-      updateData({baby:{...data.baby,lessonPlans:[...data.baby.lessonPlans,plan]}}); setAiDone(true);
+      updateData({baby:{...data.baby,lessonPlans:[...data.baby.lessonPlans,plan]}});
+      setAiDone(true);
     } catch(e) { alert(e.message||'Error generating. Try again.'); }
-    setAiLoading(false);
+    finally { setAiLoading(false); }
   };
   const saveS = () => { if(!sF.food) return; updateData({baby:{...data.baby,solids:sEdit?data.baby.solids.map(s=>s.id===sEdit.id?{...sF,id:sEdit.id}:s):[...data.baby.solids,{...sF,id:uid()}]}}); setSolidModal(false); };
   const saveI = () => { if(!iF.item) return; updateData({baby:{...data.baby,inventory:iEdit?data.baby.inventory.map(i=>i.id===iEdit.id?{...iF,id:iEdit.id}:i):[...data.baby.inventory,{...iF,id:uid()}]}}); setInvModal(false); };
   const saveM = () => { if(!mF.milestone) return; updateData({baby:{...data.baby,milestones:mEdit?data.baby.milestones.map(m=>m.id===mEdit.id?{...mF,id:mEdit.id}:m):[...data.baby.milestones,{...mF,id:uid()}]}}); setMileModal(false); };
   const rc={loved:'sage',liked:'blue',neutral:'amber',disliked:'red',allergic:'red'};
   return html`<div>
-    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18,gap:10}}>
-      <div><h2 style=${{margin:'0 0 2px',fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>👶 ${data.baby.name?data.baby.name+"'s":'Child'} Corner</h2>
-      <p style=${{margin:0,fontSize:13,color:C.textMuted}}>${babyAge===null?'Add a child name and birth date.':babyAge+' months old · Born '+fmt(data.baby.dob)}</p></div>
-      <${Btn} variant="outline" small onClick=${()=>{setProfileF({name:data.baby.name||'',dob:data.baby.dob||''});setProfileModal(true);}}>Profile<//>
+    <div style=${{marginBottom:18}}>
+      <h2 style=${{margin:'0 0 2px',fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>👶 ${data.baby.name}'s Corner</h2>
+      <p style=${{margin:0,fontSize:13,color:C.textMuted}}>${data.baby.dob?`${babyAge} months old · Born ${fmt(data.baby.dob)}`:'Add a birth date when ready'}</p>
     </div>
     <div style=${{display:'flex',gap:6,marginBottom:16,overflowX:'auto'}}>
       ${[['lessons','📚 Lessons'],['solids','🥑 Solids'],['inventory','🛍 Inventory'],['milestones','⭐ Milestones']].map(([k,l])=>html`<button key=${k} onClick=${()=>setTab(k)} style=${{border:`1.5px solid ${tab===k?C.sage:C.border}`,background:tab===k?C.sage:'transparent',color:tab===k?'#fff':C.textMuted,borderRadius:8,padding:'8px 14px',cursor:'pointer',fontSize:13,fontWeight:600,fontFamily:'inherit',flexShrink:0}}>${l}</button>`)}
@@ -1227,12 +1121,9 @@ function BabyCorner({data,updateData}) {
         </div>
       <//>
     </div>`}
-    <${Modal} title="Child Profile" open=${profileModal} onClose=${()=>setProfileModal(false)}>
-      <div style=${{display:'flex',flexDirection:'column',gap:13}}><${Inp} label="Name" value=${profileF.name||''} onChange=${v=>setProfileF({...profileF,name:v})}/><${Inp} label="Birth Date" type="date" value=${profileF.dob||''} onChange=${v=>setProfileF({...profileF,dob:v})}/><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setProfileModal(false)}>Cancel<//><${Btn} onClick=${()=>{updateData({baby:{...data.baby,...profileF}});setProfileModal(false);}}>Save<//></div></div>
-    <//>
     <${Modal} title="✦ Generate Lesson Plan" open=${genModal} onClose=${()=>setGenModal(false)}>
       <div style=${{display:'flex',flexDirection:'column',gap:13}}>
-        <div style=${{background:C.purpleLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.purple}}>AI creates a full week of play-based activities for ${data.baby.name||'your child'}!</div>
+        <div style=${{background:C.purpleLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.purple}}>AI creates a full week of play-based activities for ${data.baby.name}!</div>
         <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <${Inp} label="Week #" type="number" value=${genF.weekNum} onChange=${v=>setGenF({...genF,weekNum:v})}/>
           <${Inp} label="Age (months)" type="number" value=${genF.ageMonths} onChange=${v=>setGenF({...genF,ageMonths:+v})}/>
@@ -1255,52 +1146,152 @@ function BabyCorner({data,updateData}) {
   </div>`;
 }
 
-// ── RECORDS ───────────────────────────────────────────────────────────────────
-function Records({data,updateData,user}) {
-  const [modal,setModal] = useState(false);
-  const [edit,setEdit] = useState(null);
-  const [f,setF] = useState({});
-  const [reveal,setReveal] = useState({});
-  const open = item => { setEdit(item||null); setF(item?{...item}:{category:'',label:'',value:'',note:'',attachments:[]}); setModal(true); };
-  const save = () => { if(!f.label.trim()) return; const item={...f,id:edit?.id||uid(),attachments:f.attachments||[]}; updateData({records:edit?data.records.map(r=>r.id===edit.id?item:r):[...data.records,item]}); setModal(false); };
-  const del = async item => { if(!confirm('Delete this record and its files?'))return; await Promise.all((item.attachments||[]).map(a=>storage.ref(a.path).delete().catch(()=>{}))); updateData({records:data.records.filter(r=>r.id!==item.id)}); };
-  const updateAttachments = (id,attachments) => updateData({records:data.records.map(r=>r.id===id?{...r,attachments}:r)});
-  const cats = [...new Set(data.records.map(r=>r.category||'Uncategorized'))].sort();
-  return html`<div>
-    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}><h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Personal Records</h2><${Btn} small onClick=${()=>open(null)}>+ Add<//></div>
-    <div style=${{background:C.amberLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.amber,marginBottom:16}}>🔒 Values are hidden on screen. Firebase login and private security rules protect the stored data.</div>
-    ${cats.map(cat=>html`<div key=${cat} style=${{marginBottom:20}}><div style=${{fontWeight:700,fontSize:12,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.8,marginBottom:8}}>${cat}</div><div style=${{display:'flex',flexDirection:'column',gap:9}}>
-      ${data.records.filter(r=>(r.category||'Uncategorized')===cat).map(r=>html`<${Card} key=${r.id} style=${{padding:'13px 16px'}}>
-        <div style=${{display:'flex',alignItems:'flex-start',gap:12}}><div style=${{flex:1,minWidth:0}}><div style=${{fontSize:12,fontWeight:600,color:C.textMuted}}>${r.label}</div><div style=${{fontSize:15,fontWeight:600,color:C.text,wordBreak:'break-word'}}>${reveal[r.id]?(r.value||'—'):'••••••••'}</div>${r.note&&html`<div style=${{fontSize:12,color:C.textMuted}}>${r.note}</div>`}</div><div style=${{display:'flex',gap:4}}><${Btn} variant="ghost" small onClick=${()=>setReveal(v=>({...v,[r.id]:!v[r.id]}))}>${reveal[r.id]?'🙈':'👁'}<//><${Btn} variant="ghost" small onClick=${()=>open(r)}>✎<//><${Btn} variant="ghost" small onClick=${()=>del(r)}>✕<//></div></div>
-        <${AttachmentManager} user=${user} area="records" parentId=${r.id} attachments=${r.attachments||[]} onChange=${a=>updateAttachments(r.id,a)}/>
-      <//>`)}
-    </div></div>`)}
-    ${data.records.length===0&&html`<${Card}><p style=${{textAlign:'center',color:C.textMuted}}>No records yet. Add one, then attach images or PDFs.</p><//>`}
-    <${Modal} title=${edit?'Edit Record':'New Record'} open=${modal} onClose=${()=>setModal(false)}><div style=${{display:'flex',flexDirection:'column',gap:13}}><${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})} placeholder="Insurance, Medical, Home..."/><${Inp} label="Label" value=${f.label||''} onChange=${v=>setF({...f,label:v})} required=${true}/><${Inp} label="Value" value=${f.value||''} onChange=${v=>setF({...f,value:v})}/><${Inp} label="Note" value=${f.note||''} onChange=${v=>setF({...f,note:v})}/><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div></div><//>
+// ── ATTACHMENTS ───────────────────────────────────────────────────────────────
+function AttachmentEditor({attachments=[],onChange,area,itemId}) {
+  const [progress,setProgress]=useState(0);
+  const [busy,setBusy]=useState(false);
+  const add = async files => {
+    if(!files?.length) return;
+    setBusy(true); setProgress(0);
+    try { const added=await uploadFiles(files,area,itemId,setProgress); onChange([...(attachments||[]),...added]); }
+    catch(e){ alert(e.message||'Upload failed.'); }
+    finally { setBusy(false); setProgress(0); }
+  };
+  const remove = async att => {
+    if(!confirm(`Delete ${att.originalName}?`)) return;
+    try { await deleteStoredAttachment(att); onChange(attachments.filter(x=>x.id!==att.id)); }
+    catch(e){ alert(`Could not delete file: ${e.message}`); }
+  };
+  return html`<div style=${{display:'flex',flexDirection:'column',gap:9}}>
+    <label style=${{fontSize:13,fontWeight:600,color:C.textMuted}}>Attachments</label>
+    <div style=${{display:'flex',gap:8,flexWrap:'wrap'}}>
+      <label style=${{border:`1.5px dashed ${C.sageMd}`,background:C.sageLt,color:C.sage,borderRadius:8,padding:'9px 12px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+        📎 Image / PDF<input type="file" multiple accept="image/*,application/pdf" onChange=${e=>add(e.target.files)} style=${{display:'none'}}/>
+      </label>
+      <label style=${{border:`1.5px dashed ${C.blue}`,background:C.blueLt,color:C.blue,borderRadius:8,padding:'9px 12px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+        📷 Camera<input type="file" accept="image/*" capture="environment" onChange=${e=>add(e.target.files)} style=${{display:'none'}}/>
+      </label>
+    </div>
+    ${busy&&html`<div style=${{fontSize:12,color:C.sage}}>Uploading… ${progress}%</div>`}
+    ${(attachments||[]).map(att=>html`<div key=${att.id} style=${{display:'flex',alignItems:'center',gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 10px'}}>
+      <span>${att.mimeType==='application/pdf'?'📄':'🖼️'}</span>
+      <button type="button" onClick=${()=>previewAttachment(att)} style=${{flex:1,textAlign:'left',border:'none',background:'none',cursor:'pointer',color:C.blue,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${att.originalName}</button>
+      <span style=${{fontSize:11,color:C.textLight}}>${formatBytes(att.sizeBytes||0)}</span>
+      <${Btn} type="button" variant="ghost" small onClick=${()=>remove(att)}>✕<//>
+    </div>`)}
   </div>`;
 }
 
 // ── RECEIPTS & COUPONS ────────────────────────────────────────────────────────
-function ReceiptsCoupons({data,updateData,user}) {
+function ReceiptsCoupons({data,updateData}) {
+  const [search,setSearch]=useState('');
+  const [modal,setModal]=useState(false);
+  const [edit,setEdit]=useState(null);
+  const blank=()=>({id:uid(),type:'receipt',title:'',merchant:'',purchaseDate:today(),amount:'',category:'',tags:'',returnDate:'',expirationDate:'',notes:'',attachments:[]});
+  const [f,setF]=useState(blank());
+  const open=item=>{setEdit(item||null);setF(item?{...item,attachments:item.attachments||[]}:blank());setModal(true);};
+  const save=()=>{
+    if(!f.title.trim()) return;
+    const item={...f,updatedAt:new Date().toISOString(),createdAt:f.createdAt||new Date().toISOString()};
+    updateData({receiptsCoupons:edit?data.receiptsCoupons.map(r=>r.id===edit.id?item:r):[...data.receiptsCoupons,item]});
+    setModal(false);
+  };
+  const del=async item=>{
+    if(!confirm(`Delete “${item.title}” and its attachments?`)) return;
+    try { await Promise.all((item.attachments||[]).map(deleteStoredAttachment)); updateData({receiptsCoupons:data.receiptsCoupons.filter(r=>r.id!==item.id)}); }
+    catch(e){ alert(`Delete failed: ${e.message}`); }
+  };
+  const q=search.trim().toLowerCase();
+  const filtered=data.receiptsCoupons.filter(r=>!q||[r.title,r.merchant,r.category,r.tags,r.notes,r.type].join(' ').toLowerCase().includes(q));
+  return html`<div>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Receipts & Coupons</h2>
+      <${Btn} small onClick=${()=>open(null)}>+ Add<//>
+    </div>
+    <${Inp} value=${search} onChange=${setSearch} placeholder="Search title, merchant, category, tags or notes…" style=${{marginBottom:14}}/>
+    <div style=${{display:'flex',flexDirection:'column',gap:10}}>
+      ${filtered.map(r=>{const returnDays=r.returnDate?daysUntil(r.returnDate):null;const expDays=r.expirationDate?daysUntil(r.expirationDate):null;return html`<${Card} key=${r.id} style=${{padding:'14px 16px'}}>
+        <div style=${{display:'flex',gap:10,alignItems:'flex-start'}}>
+          <div style=${{fontSize:22}}>${r.type==='coupon'?'🎟️':'🧾'}</div>
+          <div style=${{flex:1,minWidth:0}}>
+            <div style=${{fontWeight:700,color:C.text,fontSize:15}}>${r.title}</div>
+            <div style=${{fontSize:13,color:C.textMuted}}>${[r.merchant,r.category].filter(Boolean).join(' · ')}</div>
+            <div style=${{display:'flex',gap:6,flexWrap:'wrap',marginTop:7}}>
+              <${Badge} color=${r.type==='coupon'?'purple':'sage'} small>${r.type}<//>
+              ${r.amount!==''&&html`<${Badge} color="blue" small>$${Number(r.amount||0).toFixed(2)}<//>`}
+              ${returnDays!==null&&html`<${Badge} color=${returnDays<0?'red':returnDays<=7?'amber':'green'} small>${returnDays<0?'Return closed':`${returnDays}d to return`}<//>`}
+              ${expDays!==null&&html`<${Badge} color=${expDays<0?'red':expDays<=7?'amber':'purple'} small>${expDays<0?'Expired':`${expDays}d to expire`}<//>`}
+              ${(r.attachments||[]).length>0&&html`<${Badge} color="blue" small>📎 ${(r.attachments||[]).length}<//>`}
+            </div>
+            ${(r.attachments||[]).length>0&&html`<div style=${{display:'flex',gap:6,flexWrap:'wrap',marginTop:8}}>${r.attachments.map(a=>html`<button key=${a.id} onClick=${()=>previewAttachment(a)} style=${{border:`1px solid ${C.border}`,background:C.cream,color:C.blue,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer'}}>${a.mimeType==='application/pdf'?'📄':'🖼️'} ${a.originalName}</button>`)}</div>`}
+          </div>
+          <${Btn} variant="ghost" small onClick=${()=>open(r)}>✎<//>
+          <${Btn} variant="ghost" small onClick=${()=>del(r)}>✕<//>
+        </div>
+      <//>`;})}
+      ${filtered.length===0&&html`<${Card}><p style=${{color:C.textMuted,textAlign:'center'}}>No receipts or coupons yet.</p><//>`}
+    </div>
+    <${Modal} title=${edit?'Edit Receipt / Coupon':'New Receipt / Coupon'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Sel} label="Type" value=${f.type} onChange=${v=>setF({...f,type:v})} options=${[{value:'receipt',label:'Receipt'},{value:'coupon',label:'Coupon'}]}/>
+        <${Inp} label="Title" value=${f.title} onChange=${v=>setF({...f,title:v})} required=${true}/>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Merchant / Issuer" value=${f.merchant} onChange=${v=>setF({...f,merchant:v})}/><${Inp} label="Category" value=${f.category} onChange=${v=>setF({...f,category:v})}/></div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Purchase Date" type="date" value=${f.purchaseDate} onChange=${v=>setF({...f,purchaseDate:v})}/><${Inp} label="Amount" type="number" value=${f.amount} onChange=${v=>setF({...f,amount:v})}/></div>
+        <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Return Date" type="date" value=${f.returnDate} onChange=${v=>setF({...f,returnDate:v})}/><${Inp} label="Coupon Expiration" type="date" value=${f.expirationDate} onChange=${v=>setF({...f,expirationDate:v})}/></div>
+        <${Inp} label="Tags" value=${f.tags} onChange=${v=>setF({...f,tags:v})}/>
+        <${Txa} label="Notes" value=${f.notes} onChange=${v=>setF({...f,notes:v})} rows=${3}/>
+        <${AttachmentEditor} attachments=${f.attachments||[]} onChange=${v=>setF({...f,attachments:v})} area="receipts-coupons" itemId=${f.id}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div>
+      </div>
+    <//>
+  </div>`;
+}
+
+// ── RECORDS ───────────────────────────────────────────────────────────────────
+function Records({data,updateData}) {
   const [modal,setModal] = useState(false);
   const [edit,setEdit] = useState(null);
-  const [query,setQuery] = useState('');
-  const [filter,setFilter] = useState('all');
   const [f,setF] = useState({});
-  const open = item => { setEdit(item||null); setF(item?{...item}:{type:'receipt',title:'',merchant:'',purchaseDate:today(),amount:'',category:'',tags:'',returnDate:'',expirationDate:'',notes:'',attachments:[]}); setModal(true); };
-  const save = () => { if(!f.title.trim())return; const item={...f,id:edit?.id||uid(),attachments:f.attachments||[],updatedAt:new Date().toISOString(),createdAt:edit?.createdAt||new Date().toISOString()}; updateData({receiptsCoupons:edit?data.receiptsCoupons.map(x=>x.id===edit.id?item:x):[...data.receiptsCoupons,item]}); setModal(false); };
-  const del = async item => { if(!confirm('Delete this item and its files?'))return; await Promise.all((item.attachments||[]).map(a=>storage.ref(a.path).delete().catch(()=>{}))); updateData({receiptsCoupons:data.receiptsCoupons.filter(x=>x.id!==item.id)}); };
-  const updateAttachments=(id,attachments)=>updateData({receiptsCoupons:data.receiptsCoupons.map(x=>x.id===id?{...x,attachments}:x)});
-  const q=query.trim().toLowerCase();
-  const list=[...data.receiptsCoupons].filter(x=>filter==='all'||x.type===filter).filter(x=>!q||[x.title,x.merchant,x.category,x.tags,x.notes].join(' ').toLowerCase().includes(q)).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  const [reveal,setReveal] = useState({});
+  const open = item => { setEdit(item||null); setF(item?{...item,attachments:item.attachments||[]}:{id:uid(),category:'',label:'',value:'',note:'',attachments:[]}); setModal(true); };
+  const save = () => { if(!f.label.trim()) return; const item={...f,attachments:f.attachments||[]}; updateData({records:edit?data.records.map(r=>r.id===edit.id?item:r):[...data.records,item]}); setModal(false); };
+  const del = async item => { if(!confirm(`Delete “${item.label}” and its attachments?`)) return; try { await Promise.all((item.attachments||[]).map(deleteStoredAttachment)); updateData({records:data.records.filter(r=>r.id!==item.id)}); setModal(false); } catch(e){alert(`Delete failed: ${e.message}`);} };
+  const cats = [...new Set(data.records.map(r=>r.category||'Other'))].sort();
   return html`<div>
-    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}><h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Receipts & Coupons</h2><${Btn} small onClick=${()=>open(null)}>+ Add<//></div>
-    <div style=${{display:'grid',gridTemplateColumns:'minmax(0,1fr) auto',gap:8,marginBottom:12}}><${Inp} value=${query} onChange=${setQuery} placeholder="Search merchant, title, tags..."/><${Sel} value=${filter} onChange=${setFilter} options=${[{value:'all',label:'All'},{value:'receipt',label:'Receipts'},{value:'coupon',label:'Coupons'}]}/></div>
-    <div style=${{display:'flex',flexDirection:'column',gap:10}}>${list.map(item=>{const returnDays=daysUntil(item.returnDate);const expDays=daysUntil(item.expirationDate);return html`<${Card} key=${item.id}>
-      <div style=${{display:'flex',gap:10,alignItems:'flex-start'}}><div style=${{fontSize:24}}>${item.type==='coupon'?'🎟️':'🧾'}</div><div style=${{flex:1,minWidth:0}}><div style=${{fontWeight:700,fontSize:16,color:C.text}}>${item.title}</div><div style=${{fontSize:13,color:C.textMuted}}>${item.merchant||'No merchant'}${item.purchaseDate?' · '+fmt(item.purchaseDate):''}${item.amount!==''&&item.amount!=null?` · $${item.amount}`:''}</div><div style=${{display:'flex',gap:6,flexWrap:'wrap',marginTop:7}}>${item.category&&html`<${Badge} color="blue" small>${item.category}<//>`}${item.returnDate&&html`<${Badge} color=${returnDays<0?'red':returnDays<=7?'amber':'sage'} small>${returnDays<0?'Return date passed':`Return ${fmt(item.returnDate)}`}<//>`}${item.expirationDate&&html`<${Badge} color=${expDays<0?'red':expDays<=7?'amber':'purple'} small>${expDays<0?'Expired':`Expires ${fmt(item.expirationDate)}`}<//>`}</div>${item.notes&&html`<div style=${{fontSize:12,color:C.textMuted,marginTop:6}}>${item.notes}</div>`}</div><div style=${{display:'flex',gap:4}}><${Btn} variant="ghost" small onClick=${()=>open(item)}>✎<//><${Btn} variant="ghost" small onClick=${()=>del(item)}>✕<//></div></div>
-      <${AttachmentManager} user=${user} area="receipts-coupons" parentId=${item.id} attachments=${item.attachments||[]} onChange=${a=>updateAttachments(item.id,a)}/>
-    <//>`;})}${list.length===0&&html`<${Card}><p style=${{textAlign:'center',color:C.textMuted}}>No matching receipts or coupons.</p><//>`}</div>
-    <${Modal} title=${edit?'Edit Item':'New Receipt or Coupon'} open=${modal} onClose=${()=>setModal(false)}><div style=${{display:'flex',flexDirection:'column',gap:13}}><${Sel} label="Type" value=${f.type||'receipt'} onChange=${v=>setF({...f,type:v})} options=${[{value:'receipt',label:'Receipt'},{value:'coupon',label:'Coupon'}]}/><${Inp} label="Title" value=${f.title||''} onChange=${v=>setF({...f,title:v})} required=${true}/><${Inp} label="Merchant / Issuer" value=${f.merchant||''} onChange=${v=>setF({...f,merchant:v})}/><div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Purchase Date" type="date" value=${f.purchaseDate||''} onChange=${v=>setF({...f,purchaseDate:v})}/><${Inp} label="Amount" type="number" value=${f.amount||''} onChange=${v=>setF({...f,amount:v})}/></div><div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}><${Inp} label="Return Date" type="date" value=${f.returnDate||''} onChange=${v=>setF({...f,returnDate:v})}/><${Inp} label="Coupon Expiration" type="date" value=${f.expirationDate||''} onChange=${v=>setF({...f,expirationDate:v})}/></div><${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})}/><${Inp} label="Tags" value=${f.tags||''} onChange=${v=>setF({...f,tags:v})}/><${Txa} label="Notes" value=${f.notes||''} onChange=${v=>setF({...f,notes:v})} rows=${3}/><div style=${{background:C.blueLt,color:C.blue,borderRadius:8,padding:'9px 11px',fontSize:12}}>Save the item first, then use Camera or Image/PDF on its card to attach files.</div><div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div></div><//>
+    <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+      <h2 style=${{margin:0,fontSize:22,fontWeight:700,fontFamily:"'DM Serif Display',serif",color:C.text}}>Personal Records</h2>
+      <${Btn} small onClick=${()=>open(null)}>+ Add<//>
+    </div>
+    <div style=${{background:C.amberLt,borderRadius:10,padding:'10px 14px',fontSize:13,color:C.amber,marginBottom:16}}>🔒 Sign-in and Firebase rules protect these records. Tap 👁 to reveal a value.</div>
+    ${cats.map(cat=>html`<div key=${cat} style=${{marginBottom:20}}>
+      <div style=${{fontWeight:700,fontSize:12,color:C.textMuted,textTransform:'uppercase',letterSpacing:0.8,marginBottom:8}}>${cat}</div>
+      <${Card} style=${{padding:'4px 0'}}>
+        ${data.records.filter(r=>(r.category||'Other')===cat).map(r=>html`<div key=${r.id} style=${{display:'flex',alignItems:'center',gap:12,padding:'13px 16px',borderBottom:`1px solid ${C.border}`}}>
+          <div style=${{flex:1,minWidth:0}}>
+            <div style=${{fontSize:12,fontWeight:600,color:C.textMuted}}>${r.label}</div>
+            ${r.value&&html`<div style=${{fontSize:15,fontWeight:600,color:C.text}}>${reveal[r.id]?r.value:'••••••••'}</div>`}
+            ${r.note&&html`<div style=${{fontSize:12,color:C.textMuted}}>${r.note}</div>`}
+            ${(r.attachments||[]).length>0&&html`<div style=${{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>${r.attachments.map(a=>html`<button key=${a.id} onClick=${()=>previewAttachment(a)} style=${{border:`1px solid ${C.border}`,background:C.cream,color:C.blue,borderRadius:6,padding:'4px 8px',fontSize:11,cursor:'pointer'}}>${a.mimeType==='application/pdf'?'📄':'🖼️'} ${a.originalName}</button>`)}</div>`}
+          </div>
+          <div style=${{display:'flex',gap:4}}>
+            ${r.value&&html`<${Btn} variant="ghost" small onClick=${()=>setReveal(rv=>({...rv,[r.id]:!rv[r.id]}))}>${reveal[r.id]?'🙈':'👁'}<//>`}
+            <${Btn} variant="ghost" small onClick=${()=>open(r)}>✎<//>
+            <${Btn} variant="ghost" small onClick=${()=>del(r)}>✕<//>
+          </div>
+        </div>`)}
+      <//>
+    </div>`)}
+    ${data.records.length===0&&html`<${Card}><p style=${{color:C.textMuted,textAlign:'center'}}>No records yet.</p><//>`}
+    <${Modal} title=${edit?'Edit Record':'New Record'} open=${modal} onClose=${()=>setModal(false)}>
+      <div style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Category" value=${f.category||''} onChange=${v=>setF({...f,category:v})} placeholder="Insurance, Medical, Home…"/>
+        <${Inp} label="Label" value=${f.label||''} onChange=${v=>setF({...f,label:v})} required=${true}/>
+        <${Inp} label="Value" value=${f.value||''} onChange=${v=>setF({...f,value:v})}/>
+        <${Inp} label="Note" value=${f.note||''} onChange=${v=>setF({...f,note:v})}/>
+        <${AttachmentEditor} attachments=${f.attachments||[]} onChange=${v=>setF({...f,attachments:v})} area="records" itemId=${f.id}/>
+        <div style=${{display:'flex',gap:8,justifyContent:'flex-end'}}><${Btn} variant="outline" onClick=${()=>setModal(false)}>Cancel<//><${Btn} onClick=${save}>Save<//></div>
+      </div>
+    <//>
   </div>`;
 }
 
@@ -1315,7 +1306,6 @@ function Trips({data,updateData}) {
   const openTrip = p => { setETrip(p||null); setF(p?{...p}:{destination:'',startDate:'',endDate:'',status:'planning',notes:''}); setModal(true); };
   const saveTrip = () => { if(!f.destination) return; updateData({trips:eTrip?data.trips.map(t=>t.id===eTrip.id?{...f,id:eTrip.id,packingList:eTrip.packingList||[]}:t):[...data.trips,{...f,id:uid(),packingList:[]}]}); setModal(false); };
   const at = active ? data.trips.find(t=>t.id===active) : null;
-  const deleteTrip = id => { if(confirm('Delete this trip?')){updateData({trips:data.trips.filter(t=>t.id!==id)});setActive(null);} };
   const savePack = id => { if(!pF.item) return; updateData({trips:data.trips.map(t=>t.id===id?{...t,packingList:[...t.packingList,{...pF,id:uid()}]}:t)}); setPackModal(false); };
   const toggleP = (tid,pid) => updateData({trips:data.trips.map(t=>t.id===tid?{...t,packingList:t.packingList.map(p=>p.id===pid?{...p,packed:!p.packed}:p)}:t)});
   const sc={planning:'amber',confirmed:'blue',completed:'sage',cancelled:'red'};
@@ -1343,7 +1333,7 @@ function Trips({data,updateData}) {
             <h3 style=${{margin:'0 0 3px',fontSize:20,fontWeight:700,color:C.text}}>${at.destination}</h3>
             <div style=${{fontSize:13,color:C.textMuted}}>${fmt(at.startDate)} – ${fmt(at.endDate)}</div>
           </div>
-          <div style=${{display:'flex',gap:6}}><${Btn} variant="outline" small onClick=${()=>openTrip(at)}>Edit<//><${Btn} danger small onClick=${()=>deleteTrip(at.id)}>Delete<//><${Btn} small onClick=${()=>{setPF({item:'',category:'Clothing',packed:false});setPackModal(true);}}>+ Item<//></div>
+          <${Btn} small onClick=${()=>{setPF({item:'',category:'Clothing',packed:false});setPackModal(true);}}>+ Item<//>
         </div>
         ${at.notes&&html`<div style=${{background:C.amberLt,borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>${at.notes}</div>`}
         ${[...new Set(at.packingList.map(p=>p.category))].map(cat=>html`<div key=${cat} style=${{marginBottom:14}}>
@@ -1391,7 +1381,6 @@ function Parties({data,updateData}) {
   const openP = p => { setEP(p||null); setF(p?{...p}:{name:'',date:'',venue:'',guestCount:'',theme:'',budget:'',notes:''}); setModal(true); };
   const saveP = () => { if(!f.name) return; updateData({parties:eP?data.parties.map(p=>p.id===eP.id?{...f,id:eP.id,checklist:eP.checklist||[]}:p):[...data.parties,{...f,id:uid(),checklist:[]}]}); setModal(false); };
   const at = active ? data.parties.find(p=>p.id===active) : null;
-  const deleteParty = id => { if(confirm('Delete this party?')){updateData({parties:data.parties.filter(p=>p.id!==id)});setActive(null);} };
   const saveC = pid => { if(!cF.item) return; updateData({parties:data.parties.map(p=>p.id===pid?{...p,checklist:[...p.checklist,{...cF,id:uid()}]}:p)}); setCheckModal(false); };
   const toggleC = (pid,cid) => updateData({parties:data.parties.map(p=>p.id===pid?{...p,checklist:p.checklist.map(c=>c.id===cid?{...c,done:!c.done}:c)}:p)});
   return html`<div>
@@ -1419,7 +1408,7 @@ function Parties({data,updateData}) {
             <h3 style=${{margin:'0 0 3px',fontSize:20,fontWeight:700,color:C.text}}>${at.name}</h3>
             <div style=${{fontSize:13,color:C.textMuted}}>${fmt(at.date)} · ${at.venue} · ${at.guestCount} guests</div>
           </div>
-          <div style=${{display:'flex',gap:6}}><${Btn} variant="outline" small onClick=${()=>openP(at)}>Edit<//><${Btn} danger small onClick=${()=>deleteParty(at.id)}>Delete<//><${Btn} small onClick=${()=>{setCF({item:'',dueDate:'',done:false});setCheckModal(true);}}>+ Task<//></div>
+          <${Btn} small onClick=${()=>{setCF({item:'',dueDate:'',done:false});setCheckModal(true);}}>+ Task<//>
         </div>
         <${Card}>
           <div style=${{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>Planning Checklist</div>
@@ -1429,7 +1418,6 @@ function Parties({data,updateData}) {
             </div>
             <span style=${{flex:1,fontSize:14,color:c.done?C.textMuted:C.text,textDecoration:c.done?'line-through':'none'}}>${c.item}</span>
             ${c.dueDate&&html`<span style=${{fontSize:12,color:C.textMuted}}>by ${fmt(c.dueDate)}</span>`}
-            <${Btn} variant="ghost" small onClick=${()=>updateData({parties:data.parties.map(p=>p.id===at.id?{...p,checklist:p.checklist.filter(x=>x.id!==c.id)}:p)})}>✕<//>
           </div>`)}
           ${at.checklist.length===0&&html`<p style=${{color:C.textMuted,textAlign:'center'}}>Add tasks!</p>`}
         <//>
@@ -1527,28 +1515,55 @@ function DataManagement({data, updateData}) {
   
   const handleProcessCSV = () => {
     if (!selectedFile) { setStatus('❌ Select a file first'); return; }
+    
     setStatus('⏳ Processing...');
-    Papa.parse(selectedFile, {
-      header:true,
-      skipEmptyLines:true,
-      transformHeader:h=>String(h||'').trim(),
-      complete:result=>{
-        if(result.errors?.length){setStatus(`❌ ${result.errors[0].message}`);return;}
-        const rows=(result.data||[]).filter(row=>Object.values(row).some(v=>String(v||'').trim()));
-        if(!rows.length){setStatus('❌ No valid rows found');return;}
-        const headers=result.meta.fields||Object.keys(rows[0]);
-        const normalizedFields=sections[section].fields;
-        const m={};
-        headers.forEach(h=>{
-          const clean=h.toLowerCase().replace(/[^a-z0-9]/g,'');
-          m[h]=normalizedFields.find(f=>f.toLowerCase().replace(/[^a-z0-9]/g,'')===clean)||'';
-        });
-        setCsvData(rows); setMapping(m);
-        setPreview(rows.slice(0,3).map(row=>{const o={};Object.keys(m).forEach(k=>{if(m[k])o[m[k]]=row[k];});return o;}));
-        setStep(1); setStatus('');
-      },
-      error:error=>setStatus(`❌ ${error.message||'Could not parse CSV'}`)
-    });
+    
+    try {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const csv = e.target.result;
+          const lines = csv.split('\n').filter(l => l.trim());
+          if (lines.length < 2) { setStatus('❌ CSV is empty'); return; }
+          
+          // Parse header
+          const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g,''));
+          
+          // Parse rows
+          const rows = [];
+          for (let i = 1; i < lines.length; i++) {
+            const values = lines[i].split(',').map(v => v.trim().replace(/^"/, '').replace(/"$/, ''));
+            if (values.length > 0 && values[0]) {
+              const row = {};
+              headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+              rows.push(row);
+            }
+          }
+          
+          if (rows.length === 0) { setStatus('❌ No valid rows found'); return; }
+          
+          setCsvData(rows);
+          const m = {};
+          headers.forEach(h => m[h] = h.toLowerCase().replace(/\s+/g,''));
+          setMapping(m);
+          
+          const p = rows.slice(0,3).map(row => {
+            const o = {};
+            Object.keys(m).forEach(k => { if(m[k]) o[m[k]] = row[k]; });
+            return o;
+          });
+          setPreview(p);
+          setStep(1);
+          setStatus('');
+        } catch(err) {
+          setStatus(`❌ ${err.message}`);
+        }
+      };
+      reader.onerror = () => setStatus('❌ Failed to read file');
+      reader.readAsText(selectedFile);
+    } catch(err) {
+      setStatus(`❌ Error: ${err.message}`);
+    }
   };
   
   const handleMapping = (csv, app) => {
@@ -1567,16 +1582,12 @@ function DataManagement({data, updateData}) {
     if (missing.length > 0) { setStatus(`❌ Missing: ${missing.join(', ')}`); return; }
     
     try {
-      const transformed = csvData.map(row => {
+      const transformed = csvData.map((row,idx) => {
         const item = {id:uid()};
         Object.keys(mapping).forEach(csv => {
           const app = mapping[csv];
-          if (app && row[csv] !== undefined && row[csv] !== '') item[app] = row[csv];
+          if (app && row[csv]) item[app] = row[csv];
         });
-        if(section==='calendar'){item.type=item.type||'event';item.recurring=String(item.recurring||'').toLowerCase()==='true';}
-        if(section==='kitchen'){item.servings=Number(item.servings)||1;item.nutrition={calories:0,protein:0,carbs:0,fat:0};}
-        if(section==='tasks'){item.priority=item.priority||'medium';item.owner=item.owner||'Me';item.status=item.status||'pending';}
-        if(section==='homecare'){item.frequency=item.frequency||'Monthly';}
         return item;
       });
       
@@ -1604,7 +1615,7 @@ function DataManagement({data, updateData}) {
       else if (section === 'tasks') { rows = data.tasks||[]; headers = ['title','priority','owner','status','dueDate','tags','note']; }
       else if (section === 'homecare') { rows = data.maintenance||[]; headers = ['task','frequency','lastDone','nextDue','notes']; }
       
-      const csv = [headers.join(','), ...rows.map(r=>headers.map(h=>{return escapeCsv(r[h]);}).join(','))].join('\n');
+      const csv = [headers.join(','), ...rows.map(r=>headers.map(h=>{let v=r[h]||''; if(typeof v==='string'&&v.includes(',')) v=`"${v}"`; return v;}).join(','))].join('\n');
       const blob = new Blob([csv],{type:'text/csv'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1651,7 +1662,7 @@ function DataManagement({data, updateData}) {
               ${Object.keys(csvData[0]||{}).map(k=>html`<div key=${k} style=${{padding:12,border:`1px solid ${C.border}`,borderRadius:8,background:C.cream}}>
                 <label style=${{display:'block',fontSize:11,fontWeight:700,color:C.textMuted,marginBottom:4}}>CSV: "${k}"</label>
                 <select value=${mapping[k]||''} onChange=${e=>handleMapping(k,e.target.value)} style=${{width:'100%',padding:'8px',fontSize:12,border:`1px solid ${C.border}`,borderRadius:6}}>
-                  <option value="">-- Skip --</option>
+                  <option>-- Skip --</option>
                   ${cfg.fields.map(f=>html`<option key=${f} value=${f}>${f}</option>`)}
                 </select>
               </div>`)}
@@ -1731,88 +1742,158 @@ const NAV = [
   {id:'dataManagement',label:'Data',emoji:'📊'},
 ];
 
-function App() {
-  const pageFromUrl = new URLSearchParams(location.search).get('page');
-  const [section,setSection] = useState(NAV.some(n=>n.id===pageFromUrl)?pageFromUrl:'dashboard');
-  const [user,setUser] = useState(undefined);
-  const [data,setData] = useState(null);
-  const [syncModal,setSyncModal] = useState(false);
-  const [navOpen,setNavOpen] = useState(false);
-  const [connected,setConnected] = useState(true);
-  const mobile = useMediaQuery('(max-width: 767px)');
+function App({user}) {
+  const [section, setSection] = useState('dashboard');
+  const [data, setData] = useState(null);
+  const [syncModal, setSyncModal] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [mobile,setMobile]=useState(window.innerWidth<768);
+  const dataRefRef=useRef(null);
+  useEffect(()=>{const onResize=()=>setMobile(window.innerWidth<768);window.addEventListener('resize',onResize);return()=>window.removeEventListener('resize',onResize);},[]);
+
+  useEffect(() => {
+    if (!database || !user) { setData(freshEmptyData()); return; }
+    const ref=database.ref(`users/${user.uid}/familyData`);
+    dataRefRef.current=ref;
+    const handleValue=snapshot=>setData(normalizeData(snapshot.val()));
+    const handleError=error=>{console.error('Firebase sync error:',error);alert('Could not sync data. Check Firebase rules and your connection.');setData(freshEmptyData());};
+    ref.on('value',handleValue,handleError);
+    return()=>{ref.off('value',handleValue);dataRefRef.current=null;};
+  }, [user?.uid]);
 
   useEffect(()=>{
-    if(!auth){setUser(null);return;}
-    return auth.onAuthStateChanged(setUser);
+    if('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
   },[]);
 
-  useEffect(()=>{
-    if(!user||!database)return;
-    setData(null);
-    const dataRef=database.ref(`users/${user.uid}/data`);
-    const connectedRef=database.ref('.info/connected');
-    const onConnection=s=>setConnected(!!s.val()); connectedRef.on('value',onConnection);
-    const onValue=snapshot=>{
-      const value=snapshot.val();
-      if(value){setData(normalizeData(value));}
-      else { const initial=normalizeData(EMPTY_DATA); setData(initial); dataRef.set(initial).catch(console.warn); }
-    };
-    const onError=e=>{console.warn(e);alert('Firebase sync failed. Check your database rules.');};
-    dataRef.on('value',onValue,onError);
-    return()=>{dataRef.off('value',onValue);connectedRef.off('value',onConnection);};
-  },[user?.uid]);
+  const updateData = useCallback(updates => {
+    setData(prev => normalizeData({...normalizeData(prev),...updates}));
+    if (dataRefRef.current) dataRefRef.current.update(updates).catch(e=>{console.error('Firebase write failed:',e);alert('Your change could not be synced. Please try again.');});
+  }, []);
 
-  const updateData = useCallback(updates=>{
-    if(!user)return;
-    setData(prev=>{
-      const next=normalizeData({...prev,...updates});
-      const writes={}; Object.keys(updates).forEach(key=>writes[key]=next[key]);
-      database.ref(`users/${user.uid}/data`).update(writes).catch(e=>alert(`Sync failed: ${e.message}`));
-      return next;
-    });
-  },[user?.uid]);
+  const navigate = useCallback(id => { setSection(id); setNavOpen(false); }, []);
 
-  const navigate=useCallback(id=>{setSection(id);setNavOpen(false);history.replaceState(null,'',id==='dashboard'?'/?page=dashboard':`/?page=${id}`);},[]);
+  if (!data) return html`<div style=${{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:18,color:C.sage}}>Loading ✦</div>`;
 
-  if(!firebaseConfigured)return html`<${SetupRequired}/>`;
-  if(user===undefined)return html`<div style=${{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:18,color:C.sage}}>Loading ✦</div>`;
-  if(!user)return html`<${AuthScreen}/>`;
-  if(!data)return html`<div style=${{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',fontSize:18,color:C.sage}}>Syncing your data ✦</div>`;
-
-  const SECTIONS={
-    dashboard:html`<${Dashboard} data=${data} navigate=${navigate}/>`,
-    tasks:html`<${Tasks} data=${data} updateData=${updateData}/>`,
-    calendar:html`<${CalendarSection} data=${data} updateData=${updateData}/>`,
-    groceries:html`<${Groceries} data=${data} updateData=${updateData}/>`,
-    kitchen:html`<${Kitchen} data=${data} updateData=${updateData}/>`,
-    homecare:html`<${HomeCare} data=${data} updateData=${updateData}/>`,
-    trips:html`<${Trips} data=${data} updateData=${updateData}/>`,
-    parties:html`<${Parties} data=${data} updateData=${updateData}/>`,
-    baby:html`<${BabyCorner} data=${data} updateData=${updateData}/>`,
-    records:html`<${Records} data=${data} updateData=${updateData} user=${user}/>`,
-    receipts:html`<${ReceiptsCoupons} data=${data} updateData=${updateData} user=${user}/>`,
-    dataManagement:html`<${DataManagement} data=${data} updateData=${updateData}/>`
+  const SECTIONS = {
+    dashboard: html`<${Dashboard} data=${data} navigate=${navigate}/>`,
+    tasks: html`<${Tasks} data=${data} updateData=${updateData}/>`,
+    calendar: html`<${CalendarSection} data=${data} updateData=${updateData}/>`,
+    groceries: html`<${Groceries} data=${data} updateData=${updateData}/>`,
+    kitchen: html`<${Kitchen} data=${data} updateData=${updateData}/>`,
+    homecare: html`<${HomeCare} data=${data} updateData=${updateData}/>`,
+    trips: html`<${Trips} data=${data} updateData=${updateData}/>`,
+    parties: html`<${Parties} data=${data} updateData=${updateData}/>`,
+    baby: html`<${BabyCorner} data=${data} updateData=${updateData}/>`,
+    records: html`<${Records} data=${data} updateData=${updateData}/>` ,
+    receipts: html`<${ReceiptsCoupons} data=${data} updateData=${updateData}/>`,
+    dataManagement: html`<${DataManagement} data=${data} updateData=${updateData}/>`,
   };
-  const cur=NAV.find(n=>n.id===section);
-  const navPanel=html`<div style=${{display:'flex',position:mobile?'fixed':'relative',left:0,top:0,bottom:0,zIndex:50,width:mobile?280:240,height:'100%',flexDirection:'column',flexShrink:0,background:C.card,borderRight:`1px solid ${C.border}`,boxShadow:mobile?'8px 0 30px rgba(0,0,0,.16)':'none'}}>
-    <div style=${{padding:'18px 16px 14px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',gap:10}}><div style=${{width:34,height:34,borderRadius:10,background:C.sage,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff'}}>✦</div><div style=${{minWidth:0,flex:1}}><div style=${{fontWeight:700,fontSize:14,color:C.text,fontFamily:"'DM Serif Display',serif"}}>Family Life OS</div><div style=${{fontSize:10,color:connected?C.green:C.red}}>${connected?'● Synced':'● Offline'} · ${user.email}</div></div>${mobile&&html`<button onClick=${()=>setNavOpen(false)} style=${{border:'none',background:'none',fontSize:20,cursor:'pointer'}}>✕</button>`}</div>
-    <nav style=${{flex:1,padding:10,overflowY:'auto'}}>${NAV.map(n=>html`<button key=${n.id} onClick=${()=>navigate(n.id)} style=${{display:'flex',alignItems:'center',gap:10,width:'100%',padding:'10px 12px',borderRadius:8,border:'none',cursor:'pointer',fontFamily:'inherit',fontWeight:section===n.id?700:500,fontSize:14,marginBottom:2,textAlign:'left',background:section===n.id?C.sageLt:'transparent',color:section===n.id?C.sage:C.textMuted}}><span style=${{fontSize:18}}>${n.emoji}</span>${n.label}</button>`)}</nav>
-    <div style=${{padding:10,borderTop:`1px solid ${C.border}`,display:'flex',flexDirection:'column',gap:7}}><button onClick=${()=>setSyncModal(true)} style=${{padding:'9px 11px',borderRadius:9,border:`1px solid ${C.border}`,background:C.sageLt,color:C.sage,fontWeight:700,cursor:'pointer'}}>⬇ Backup / Import</button><button onClick=${()=>auth.signOut()} style=${{padding:'9px 11px',borderRadius:9,border:`1px solid ${C.border}`,background:C.card,color:C.textMuted,fontWeight:700,cursor:'pointer'}}>Sign out</button></div>
-  </div>`;
 
-  return html`<div style=${{display:'flex',height:'100vh',background:C.cream,overflow:'hidden'}}>
-    ${mobile&&navOpen&&html`<div onClick=${()=>setNavOpen(false)} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,.45)',zIndex:40}}></div>`}
-    ${(!mobile||navOpen)&&navPanel}
-    <div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
-      ${mobile&&html`<div style=${{display:'flex',alignItems:'center',padding:'7px 10px',borderBottom:`1px solid ${C.border}`,background:C.card,minHeight:48}}><button onClick=${()=>setNavOpen(true)} style=${{border:'none',background:'none',fontSize:21,cursor:'pointer',width:42}}>☰</button><span style=${{fontWeight:700,fontSize:14,color:C.text,flex:1,textAlign:'center'}}>${cur?.emoji} ${cur?.label}</span><span style=${{width:42,textAlign:'center',fontSize:12,color:connected?C.green:C.red}}>${connected?'●':'○'}</span></div>`}
-      <div style=${{flex:1,overflow:'auto',padding:mobile?'14px 12px 80px':'20px 18px',maxWidth:900,width:'100%',margin:'0 auto'}}>${SECTIONS[section]}</div>
-      ${mobile&&html`<div style=${{position:'fixed',left:0,right:0,bottom:0,height:64,paddingBottom:'env(safe-area-inset-bottom)',background:C.card,borderTop:`1px solid ${C.border}`,display:'grid',gridTemplateColumns:'repeat(5,1fr)',zIndex:30}}>${NAV.slice(0,4).concat([{id:'more',label:'More',emoji:'☰'}]).map(n=>html`<button key=${n.id} onClick=${()=>n.id==='more'?setNavOpen(true):navigate(n.id)} style=${{border:'none',background:'transparent',fontSize:10,color:section===n.id?C.sage:C.textMuted,fontWeight:700,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer'}}><span style=${{fontSize:19}}>${n.emoji}</span>${n.label}</button>`)}</div>`}
+  const cur = NAV.find(n=>n.id===section);
+
+  return html`<div style=${{display:'flex',height:'100vh',background:C.cream,overflow:'hidden',flexDirection:mobile?'column':'row'}}>
+    ${navOpen&&mobile&&html`<div onClick=${()=>setNavOpen(false)} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:40}}></div>`}
+
+    <div style=${{
+      display:mobile&&!navOpen?'none':'flex',
+      position:mobile?'fixed':'relative',
+      left:0,top:0,bottom:0,zIndex:50,width:mobile?'100%':240,height:mobile?'auto':'100%',flexDirection:mobile?'row':'column',
+      flexShrink:0,background:C.card,
+      borderRight:mobile?'none':`1px solid ${C.border}`,
+      borderTop:mobile?`1px solid ${C.border}`:'none',
+      transition:mobile?'none':'left 0.25s ease',
+    }}>
+      <div style=${{padding:mobile?'12px 16px':'18px 16px 14px',borderBottom:mobile?'none':`1px solid ${C.border}`,borderRight:mobile?`1px solid ${C.border}`:'none',display:'flex',alignItems:'center',gap:10,flexShrink:0,width:mobile?'auto':'100%'}}>
+        <div style=${{width:34,height:34,borderRadius:10,background:C.sage,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          <span style=${{color:'#fff',fontSize:16}}>✦</span>
+        </div>
+        ${!mobile&&html`<div>
+          <div style=${{fontWeight:700,fontSize:14,color:C.text,fontFamily:"'DM Serif Display',serif",lineHeight:1.2}}>Family Life OS</div>
+          <div style=${{fontSize:11,color:C.textMuted}}>Private family workspace</div>
+        </div>`}
+        ${mobile&&html`<button onClick=${()=>setNavOpen(false)} style=${{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',fontSize:20,color:C.text}}>✕</button>`}
+      </div>
+      <nav style=${{flex:mobile?'0 0 auto':'1',padding:mobile?'0':'10px',overflowY:mobile?'hidden':'auto',overflowX:mobile?'auto':'hidden',display:'flex',flexDirection:mobile?'row':'column',width:mobile?'100%':'auto',maxHeight:mobile?'60px':'100%',position:mobile?'fixed':'relative',bottom:mobile?0:'auto',left:mobile?0:'auto',right:mobile?0:'auto',zIndex:mobile?100:'auto',background:mobile?C.card:'transparent',borderTop:mobile?`1px solid ${C.border}`:'none',boxShadow:mobile?'0 -2px 8px rgba(0,0,0,0.06)':'none',paddingBottom:mobile?'max(4px, env(safe-area-inset-bottom))':'0',height:mobile?'58px':'auto'}}>
+        ${NAV.map(n=>html`<button key=${n.id} onClick=${()=>navigate(n.id)} style=${{
+          display:'flex',alignItems:mobile?'center':'flex-start',gap:mobile?2:10,width:mobile?'auto':'100%',padding:mobile?'4px 8px':'10px 12px',
+          borderRadius:8,border:'none',cursor:'pointer',fontFamily:'inherit',
+          fontWeight:section===n.id?700:500,fontSize:mobile?10:14,marginBottom:mobile?0:2,textAlign:'left',
+          background:section===n.id?C.sageLt:'transparent',color:section===n.id?C.sage:C.textMuted,
+          flexDirection:mobile?'column':'row',whiteSpace:mobile?'nowrap':'normal',flex:mobile?1:0,justifyContent:mobile?'center':'flex-start',minHeight:mobile?50:'auto',
+        }}><span style=${{fontSize:mobile?18:18}}>${n.emoji}</span> <span style=${{fontSize:mobile?9:14}}>${n.label}</span></button>`)}
+      </nav>
+      ${!mobile&&html`<div style=${{padding:'10px',borderTop:`1px solid ${C.border}`,marginTop:'auto',display:'flex',flexDirection:'column',gap:7}}>
+        <div style=${{fontSize:11,color:C.textMuted,overflow:'hidden',textOverflow:'ellipsis'}}>${user.email}</div>
+        <button onClick=${()=>setSyncModal(true)} style=${{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',borderRadius:10,border:`1.5px solid ${C.border}`,cursor:'pointer',fontFamily:'inherit',fontWeight:600,fontSize:13,background:C.sageLt,color:C.sage}}>⬇ Backup / Import</button>
+        <button onClick=${()=>auth.signOut()} style=${{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',borderRadius:10,border:`1.5px solid ${C.border}`,cursor:'pointer',fontFamily:'inherit',fontWeight:600,fontSize:13,background:C.card,color:C.textMuted}}>Sign out</button>
+      </div>`}
     </div>
-    <${Modal} title="Backup / Import" open=${syncModal} onClose=${()=>setSyncModal(false)}><${SyncPanel} data=${data} onImport=${d=>updateData(normalizeData(d))} onClose=${()=>setSyncModal(false)}/><//>
+
+    <div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0,width:mobile?'100%':'auto'}}>
+      ${mobile&&html`<div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 12px',borderBottom:`1px solid ${C.border}`,background:C.card,flexShrink:0,minHeight:40,maxHeight:40}}>
+        <button onClick=${()=>setNavOpen(true)} style=${{background:'none',border:'none',cursor:'pointer',fontSize:20,color:C.text,padding:'2px 4px',minWidth:40,minHeight:40,display:'flex',alignItems:'center'}}>☰</button>
+        <span style=${{fontWeight:600,fontSize:12,color:C.text,fontFamily:"'DM Serif Display',serif",flex:1,textAlign:'center'}}>${cur?.emoji} ${cur?.label}</span>
+        <button onClick=${()=>setSyncModal(true)} style=${{background:'none',border:'none',cursor:'pointer',fontSize:16,color:C.sage,padding:'2px 4px',minWidth:40,minHeight:40,display:'flex',alignItems:'center'}}>🔄</button>
+      </div>`}
+
+      <div style=${{flex:1,overflow:'auto',padding:mobile?'10px 12px':'20px 18px',maxWidth:860,width:'100%',margin:'0 auto',paddingBottom:mobile?'70px':'20px'}}>
+        ${SECTIONS[section]}
+      </div>
+    </div>
+
+    <${Modal} title="🔄 Family Sync" open=${syncModal} onClose=${()=>setSyncModal(false)}>
+      <${SyncPanel} data=${data} onImport=${d=>updateData(d)} onClose=${()=>setSyncModal(false)}/><div style=${{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><${Btn} variant="outline" onClick=${()=>auth.signOut()}>Sign out (${user.email})<//></div>
+    <//>
   </div>`;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+function AuthScreen() {
+  const [mode,setMode]=useState('signin');
+  const [email,setEmail]=useState('');
+  const [password,setPassword]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const submit=async e=>{
+    e?.preventDefault(); setError(''); setBusy(true);
+    try {
+      if(mode==='signup') await auth.createUserWithEmailAndPassword(email.trim(),password);
+      else await auth.signInWithEmailAndPassword(email.trim(),password);
+    } catch(err) { setError(String(err.message||'Login failed.').replace('Firebase: ','')); }
+    finally { setBusy(false); }
+  };
+  const reset=async()=>{if(!email.trim()){setError('Enter your email first.');return;}try{await auth.sendPasswordResetEmail(email.trim());setError('Password reset email sent.');}catch(e){setError(e.message||'Could not send reset email.');}};
+  if(firebaseSetupError||!auth) return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:C.cream}}><${Card} style=${{maxWidth:560}}><h2 style=${{color:C.red,marginBottom:10}}>Firebase setup needed</h2><p style=${{color:C.text,lineHeight:1.6}}>${firebaseSetupError||'Firebase Authentication is unavailable.'}</p><p style=${{color:C.textMuted,marginTop:10,fontSize:13}}>Open firebase-config.js in GitHub, replace every PASTE_ value using Firebase Console → Project settings → Your apps → SDK setup and configuration → Config, and commit the change.</p><//></div>`;
+  return html`<div style=${{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',padding:20,background:`linear-gradient(145deg,${C.sageLt},${C.cream},${C.amberLt})`}}>
+    <${Card} style=${{width:'100%',maxWidth:420,padding:'28px'}}>
+      <div style=${{width:48,height:48,borderRadius:14,background:C.sage,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,marginBottom:16}}>✦</div>
+      <h1 style=${{fontFamily:"'DM Serif Display',serif",fontSize:27,color:C.text,marginBottom:4}}>Family Life OS</h1>
+      <p style=${{color:C.textMuted,fontSize:14,marginBottom:20}}>${mode==='signup'?'Create your private account':'Sign in to sync your devices'}</p>
+      <form onSubmit=${submit} style=${{display:'flex',flexDirection:'column',gap:13}}>
+        <${Inp} label="Email" type="email" value=${email} onChange=${setEmail} required=${true}/>
+        <${Inp} label="Password" type="password" value=${password} onChange=${setPassword} required=${true}/>
+        ${error&&html`<div style=${{background:error.includes('sent')?C.greenLt:C.redLt,color:error.includes('sent')?C.green:C.red,borderRadius:8,padding:'10px 12px',fontSize:13}}>${error}</div>`}
+        <${Btn} disabled=${busy||!email||password.length<6} onClick=${submit} style=${{justifyContent:'center'}}>${busy?'Please wait…':mode==='signup'?'Create account':'Sign in'}<//>
+      </form>
+      <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:14,gap:8}}>
+        <button onClick=${()=>{setMode(mode==='signup'?'signin':'signup');setError('');}} style=${{border:'none',background:'none',color:C.sage,cursor:'pointer',fontWeight:600}}>${mode==='signup'?'Already have an account?':'Create account'}</button>
+        ${mode==='signin'&&html`<button onClick=${reset} style=${{border:'none',background:'none',color:C.textMuted,cursor:'pointer',fontSize:12}}>Forgot password?</button>`}
+      </div>
+    <//>
+  </div>`;
+}
+
+function Root() {
+  const [ready,setReady]=useState(false);
+  const [user,setUser]=useState(null);
+  useEffect(()=>{
+    if(!auth){setReady(true);return;}
+    return auth.onAuthStateChanged(u=>{setUser(u);setReady(true);});
+  },[]);
+  if(!ready) return html`<div style=${{height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:C.sage}}>Loading ✦</div>`;
+  return user ? html`<${App} user=${user}/>` : html`<${AuthScreen}/>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Root}/>`);
 </script>
 </body>
 </html>
