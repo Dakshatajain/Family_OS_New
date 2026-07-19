@@ -3,11 +3,12 @@
 // Firebase's browser config is designed to be public; your data is protected
 // by Authentication plus the Database and Storage rules included in this project.
 window.FAMILY_OS_FIREBASE_CONFIG = {
-  apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://PASTE_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "PASTE_MESSAGING_SENDER_ID",
-  appId: "PASTE_APP_ID"
+  apiKey: "AIzaSyD6FJhog7JniSDizq4QJlgqKNbUaBG9QRE",
+  authDomain: "familyosnew.firebaseapp.com",
+  databaseURL: "https://familyosnew-default-rtdb.firebaseio.com",
+  projectId: "familyosnew",
+  storageBucket: "familyosnew.firebasestorage.app",
+  messagingSenderId: "1066492281051",
+  appId: "1:1066492281051:web:3cb2244be3234c9dc68cfe",
+  measurementId: "G-8FJS4T4X4H"
 };
