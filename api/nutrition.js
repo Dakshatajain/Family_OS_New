@@ -19,6 +19,15 @@ function cleanJson(text) {
   return String(text || '').replace(/```json/gi, '').replace(/```/g, '').trim();
 }
 
+function parseServings(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  const source = String(value ?? '').replace(/â€“|â€”/g, '-');
+  const nums = source.match(/\d+(?:\.\d+)?/g)?.map(Number).filter(n => Number.isFinite(n) && n > 0) || [];
+  if (!nums.length) return 1;
+  if (nums.length > 1 && /-|–|—/.test(source)) return (nums[0] + nums[1]) / 2;
+  return nums[0];
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -27,7 +36,7 @@ export default async function handler(req, res) {
   try {
     if (!(await verifyFirebaseUser(req))) return res.status(401).json({ error: 'Please sign in again.' });
     const ingredients = String(req.body?.ingredients || '').trim();
-    const servings = Number(req.body?.servings || 1);
+    const servings = parseServings(req.body?.servings);
     if (!ingredients) return res.status(400).json({ error: 'Ingredients are required.' });
     if (ingredients.length > 12000) return res.status(400).json({ error: 'Ingredients are too long.' });
     if (!Number.isFinite(servings) || servings <= 0 || servings > 100) return res.status(400).json({ error: 'Servings must be between 1 and 100.' });
