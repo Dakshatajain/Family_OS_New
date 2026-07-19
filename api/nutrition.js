@@ -42,9 +42,13 @@ export default async function handler(req, res) {
     if (!Number.isFinite(servings) || servings <= 0 || servings > 100) return res.status(400).json({ error: 'Servings must be between 1 and 100.' });
 
     const prompt = `Estimate nutrition PER SERVING for this recipe.\n\nIngredients:\n${ingredients}\n\nServings: ${servings}\n\nReturn JSON with numeric fields only: calories, protein, carbs, fat.`;
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+    const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.2 }

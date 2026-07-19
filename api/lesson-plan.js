@@ -32,9 +32,13 @@ export default async function handler(req, res) {
     if (!theme) return res.status(400).json({ error: 'Theme is required.' });
 
     const prompt = `Create exactly 6 safe, play-based toddler activities for age ${ageMonths} months. Theme: ${theme}. Optional focus: color ${input.color || 'any'}, animal ${input.animal || 'any'}, letter ${input.letter || 'any'}, body part ${input.bodyPart || 'any'}, shape ${input.shape || 'any'}, number ${input.number || 'any'}. Use days Monday, Tuesday, Wednesday, Thursday, Friday, Weekend. Return JSON only as {"activities":[{"day":"Monday","time":"Morning","title":"...","desc":"...","materials":"..."}]}. Avoid choking hazards and unsafe materials.`;
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+    const GEMINI_API_KEY = String(process.env.GEMINI_API_KEY || '').trim();
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0.5 }
