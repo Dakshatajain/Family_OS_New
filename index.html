@@ -36,6 +36,7 @@ input:focus,select:focus,textarea:focus{outline:none!important;border-color:#5F8
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+<script src="family-os-enhancements.js"></script>
 <script>
 'use strict';
 const html = htm.bind(React.createElement);
@@ -1750,6 +1751,22 @@ function DataManagement({data, updateData}) {
       </div>
     `}
   </div>`;
+}
+
+// ── FAMILY OS ENHANCEMENTS ────────────────────────────────────────────────────
+const LegacyBabyCorner = BabyCorner;
+
+if (window.createFamilyOSEnhancements) {
+  const enhanced = window.createFamilyOSEnhancements({
+    React, html, C, Badge, Btn, Card, Inp, Sel, Txa, Modal,
+    auth, fileStorage, today, fmt, daysUntil, uid, recurringDate,
+    safeFilename, formatBytes, LegacyBabyCorner
+  });
+
+  CalendarSection = enhanced.CalendarSection;
+  Trips = enhanced.Trips;
+  Parties = enhanced.Parties;
+  BabyCorner = enhanced.BabyCorner;
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
